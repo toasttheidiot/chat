@@ -1,0 +1,56 @@
+<!doctype html><html lang="en"><head><title>Rooms</title><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="style.css"></head><body>
+<div id="app"><aside id="side"></aside><section id="right"><header id="top"></header><div id="row"><nav id="chan" hidden></nav><main id="content"></main></div></section></div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script><script src="config.js"></script><script src="app.js"></script>
+<script>
+let room = null, channel = null;
+$('#top').textContent = 'Rooms';
+$('#content').innerHTML = '<div class="empty"><p>Select a room from the list.</p></div>';
+
+async function loadRooms() {
+  const { data = [] } = await sb.from('room_members').select('rooms(id,name)').eq('user_id', me.id);
+  const items = data.map(r => ({ id: r.rooms.id, label: r.rooms.name, sub: 'ID: ' + r.rooms.id }));
+  list(items, room?.id, pickRoom, 'No rooms yet. Create one or join with an ID.');
+}
+async function pickRoom(it) {
+  room = it; channel = null;
+  loadRooms();
+  $('#top').innerHTML = esc(it.label) + ' <small>ID: ' + esc(it.id) + '</small>';
+  $('#content').innerHTML = '';
+  const { data = [] } = await sb.from('channels').select('*').eq('room_id', it.id).order('created_at');
+  const nav = $('#chan');
+  nav.hidden = false; nav.innerHTML = '';
+  for (const c of data) {
+    const b = document.createElement('button');
+    b.className = 'item'; b.textContent = '# ' + c.name;
+    b.onclick = () => pickChannel(c, nav, b);
+    nav.append(b);
+  }
+  if (data[0]) pickChannel(data[0], nav, nav.firstChild);
+}
+function pickChannel(c, nav, btn) {
+  nav.querySelectorAll('.item').forEach(x => x.classList.remove('on'));
+  btn.classList.add('on');
+  channel = c;
+  openChat('room_messages', 'channel_id', c.id);
+}
+boot('rooms').then(() => {
+  addButton('+ Create room', async () => {
+    const n = prompt('Room name:');
+    if (!n) return;
+    const { data, error } = await sb.rpc('create_room', { rname: n.trim() });
+    if (error) return alert(error.message);
+    alert('Room created. Share this ID so others can join: ' + data);
+    await loadRooms();
+    pickRoom({ id: data, label: n.trim() });
+  });
+  addButton('Join with ID', async () => {
+    const id = prompt('Enter room ID:');
+    if (!id) return;
+    const { data, error } = await sb.rpc('join_room', { rid: id.trim() });
+    if (error) return alert(error.message);
+    await loadRooms();
+    pickRoom({ id: id.trim(), label: data });
+  });
+  loadRooms();
+});
+</script></body></html>

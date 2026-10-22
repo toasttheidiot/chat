@@ -1,0 +1,33 @@
+<!doctype html><html lang="en"><head><title>Direct messages</title><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="style.css"></head><body>
+<div id="app"><aside id="side"></aside><section id="right"><header id="top"></header><div id="row"><nav id="chan" hidden></nav><main id="content"></main></div></section></div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script><script src="config.js"></script><script src="app.js"></script>
+<script>
+let current = null;
+$('#top').textContent = 'Direct messages';
+$('#content').innerHTML = '<div class="empty"><p>Select a DM from the list.</p></div>';
+
+async function loadDms() {
+  const { data: dms = [] } = await sb.from('dms').select('*');
+  const ids = dms.map(d => d.user_a === me.id ? d.user_b : d.user_a);
+  const { data: ps = [] } = ids.length ? await sb.from('profiles').select('id,username').in('id', ids) : {};
+  const items = dms.map((d, i) => ({ id: d.id, label: ps.find(p => p.id === ids[i])?.username || 'unknown' }));
+  list(items, current, pick, 'No DMs yet. Use the button below to start one.');
+}
+function pick(it) {
+  current = it.id;
+  $('#top').textContent = it.label;
+  loadDms();
+  openChat('dm_messages', 'dm_id', it.id);
+}
+boot('dms').then(() => {
+  addButton('+ Start a DM', async () => {
+    const u = prompt('Enter their exact username:');
+    if (!u) return;
+    const { data, error } = await sb.rpc('start_dm', { uname: u.trim() });
+    if (error) return alert(error.message);
+    await loadDms();
+    pick({ id: data, label: u.trim() });
+  });
+  loadDms();
+});
+</script></body></html>

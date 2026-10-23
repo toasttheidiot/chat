@@ -15,7 +15,8 @@ function clearRoom() {
 }
 
 async function loadRooms() {
-  const { data } = await sb.from('room_members').select('can_talk,can_kick,can_channels,rooms(id,name,owner_id)').eq('user_id', me.id);
+  const { data, error } = await sb.from('room_members').select('can_talk,can_kick,can_channels,rooms(id,name,owner_id)').eq('user_id', me.id);
+  if (error) { $('#list').innerHTML = '<div class="hint">Could not load rooms: ' + esc(error.message) + '</div>'; return; }
   rooms = (data || []).filter(r => r.rooms).map(r => ({
     id: r.rooms.id, label: r.rooms.name, sub: 'ID: ' + r.rooms.id,
     owner: r.rooms.owner_id, isOwner: r.rooms.owner_id === me.id, canTalk: r.can_talk, canKick: r.can_kick, canChannels: r.can_channels

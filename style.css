@@ -31,7 +31,15 @@ input:focus,textarea:focus,button:focus-visible{border-color:#888}
 #content{flex:1;display:flex;flex-direction:column;min-width:0;min-height:0}
 .empty{margin:auto;text-align:center;padding:24px}.empty h1{font-size:52px;margin:0 0 8px;letter-spacing:-.02em}.empty p{color:var(--mute);margin:0;font-size:17px}
 .msgs{flex:1;overflow:auto;padding:16px 20px}
-.msg{margin-bottom:12px}.msg small{color:var(--mute);margin-left:6px;font-size:12px}.msg div{white-space:pre-wrap;overflow-wrap:anywhere}
+.msg{display:flex;gap:12px;margin-top:14px}.msg.grp{margin-top:2px}
+.msg .body{flex:1;min-width:0}.msg small{color:var(--mute);margin-left:6px;font-size:12px}
+.txt{white-space:pre-wrap;overflow-wrap:anywhere}
+.pfp.sm{width:40px;height:40px;font-size:15px;border-width:1px;flex:none}
+.msg.grp .pfp,.msg.grp .head{display:none}.msg.grp .body{margin-left:52px}
+.eu{display:block;color:var(--mute);font-size:12px}.msg:not(.grp) .eu{display:none}
+.phead{display:flex;align-items:center;gap:14px}.phead h3{margin:0}
+.prow{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:6px 0}.prow .note{margin:2px 0 0}
+.pfoot{display:flex;justify-content:flex-end}
 .send{display:flex;gap:8px;padding:14px;border-top:2px solid var(--line)}.send input{flex:1}
 .gate{position:fixed;inset:0;background:var(--bg);display:grid;place-items:center}
 .gate form{display:grid;gap:10px;width:min(320px,90vw)}.gate h2{margin:0 0 6px}.gate p{color:var(--mute);margin:0;min-height:1.4em}

@@ -11,7 +11,7 @@ async function loadDms() {
   const ids = dms.map(d => d.user_a === me.id ? d.user_b : d.user_a);
   const { data: ps = [] } = ids.length ? await sb.from('profiles').select('id,username').in('id', ids) : {};
   const items = dms.map((d, i) => ({ id: d.id, label: ps.find(p => p.id === ids[i])?.username || 'unknown' }));
-  list(items, current, pick, 'No DMs yet. Use the button below to start one.');
+  list(await applyOrder(items), current, pick, 'No DMs yet. Use the button below to start one.');
 }
 function pick(it) {
   current = it.id;

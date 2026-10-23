@@ -1,0 +1,114 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><script>try{document.documentElement.dataset.theme=localStorage.getItem('theme')||'dark'}catch(e){}</script>
+<meta name="viewport" content="width=device-width,initial-scale=1"><title>Settings</title><link rel="stylesheet" href="style.css"></head><body>
+<div class="set"><nav id="snav"><h3>Settings</h3></nav><main id="spane"></main></div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script><script src="config.js"></script><script src="app.js"></script>
+<script>
+const pane = $('#spane'), nav = $('#snav');
+const tabs = { 'User info': userInfo, 'Account': account, 'Display': display };
+const say = t => { const m = $('#msg'); if (m) m.textContent = t; };
+
+auth().then(() => {
+  if (isMod) tabs['Moderator'] = moderator;
+  for (const name in tabs) {
+    const b = document.createElement('button');
+    b.className = 'item'; b.textContent = name;
+    b.onclick = () => show(name, b);
+    nav.append(b);
+  }
+  nav.querySelector('.item').click();
+});
+function show(name, b) {
+  nav.querySelectorAll('.item').forEach(x => x.classList.toggle('on', x === b));
+  pane.innerHTML = `<h2>${name}</h2>`;
+  tabs[name]();
+}
+
+function userInfo() {
+  pane.insertAdjacentHTML('beforeend', `
+    <div class="row l"><div class="pfp big" id="av"></div>
+      <div><button id="pick">Change picture</button><input id="file" type="file" accept="image/*" hidden>
+      <p class="note">PNG, JPG, GIF or WebP, up to 2 MB.</p></div></div>
+    <label>Username<input id="un" maxlength="30"></label>
+    <label>Description<textarea id="ds" rows="3" maxlength="150"></textarea></label>
+    <button id="save">Save changes</button><p class="note" id="msg"></p>`);
+  paintAvatar($('#av'), profile);
+  $('#un').value = profile.username;
+  $('#ds').value = profile.description || '';
+  $('#pick').onclick = () => $('#file').click();
+  $('#file').onchange = async e => {
+    const f = e.target.files[0];
+    if (!f) return;
+    if (!f.type.startsWith('image/')) return say('Please choose an image file.');
+    if (f.size > 2 * 1024 * 1024) return say('The image must be under 2 MB.');
+    const path = `${me.id}/avatar`;
+    const up = await sb.storage.from('avatars').upload(path, f, { upsert: true, contentType: f.type });
+    if (up.error) return say(up.error.message);
+    const url = sb.storage.from('avatars').getPublicUrl(path).data.publicUrl + '?v=' + Date.now();
+    const { error } = await sb.from('profiles').update({ avatar_url: url }).eq('id', me.id);
+    if (error) return say(error.message);
+    profile.avatar_url = url; paintAvatar($('#av'), profile); say('Picture updated.');
+  };
+  $('#save').onclick = async () => {
+    const un = $('#un').value.trim().toLowerCase(), ds = $('#ds').value.trim(), old = profile.username;
+    if (!/^[^\s@]{2,30}$/.test(un)) return say('Username must be 2–30 characters with no spaces or @.');
+    const { error } = await sb.from('profiles').update({ username: un, description: ds }).eq('id', me.id);
+    if (error) return say(error.code === '23505' ? 'That username is taken.' : error.message);
+    if (un !== old) {
+      const email = un + '@gmail.com';
+      const { data, error: e2 } = await sb.auth.updateUser({ email });
+      if (e2 || data.user.email !== email) {
+        await sb.from('profiles').update({ username: old }).eq('id', me.id);
+        return say(e2 ? e2.message : 'Supabase is waiting for an email confirmation, so the username was not changed. Turn off "Confirm email" and "Secure email change" in Authentication settings.');
+      }
+      await sb.auth.refreshSession();
+    }
+    profile.username = un; profile.description = ds;
+    say(un !== old ? 'Saved. Use your new username next time you sign in.' : 'Saved.');
+  };
+}
+
+function account() {
+  pane.insertAdjacentHTML('beforeend', `
+    <div class="card"><h3>Sign out</h3><p class="note">Sign out of this device.</p><button id="out">Sign out</button></div>
+    <div class="card"><h3>Delete account</h3><p class="note">Permanently deletes your account, profile and messages. This can’t be undone.</p>
+      <button id="del" class="danger">Delete my account</button></div>`);
+  $('#out').onclick = async () => { await sb.auth.signOut(); location.href = 'index.html'; };
+  $('#del').onclick = async () => {
+    if (prompt('Type DELETE to permanently delete your account.') !== 'DELETE') return;
+    await sb.storage.from('avatars').remove([`${me.id}/avatar`]);
+    const { error } = await sb.rpc('delete_my_account');
+    if (error) return alert(error.message);
+    await sb.auth.signOut().catch(() => {});
+    location.href = 'index.html';
+  };
+}
+
+function display() {
+  pane.insertAdjacentHTML('beforeend', `
+    <div class="card row"><div><h3>Light mode</h3><p class="note">Use a light color scheme across the whole app.</p></div>
+    <input type="checkbox" class="sw" id="lt"></div>`);
+  $('#lt').checked = document.documentElement.dataset.theme === 'light';
+  $('#lt').onchange = e => setTheme(e.target.checked ? 'light' : 'dark');
+}
+
+async function moderator() {
+  pane.insertAdjacentHTML('beforeend', `
+    <div class="card"><h3>Your powers</h3><p class="note">Right-click any message to edit or delete it. On other people’s messages you also get Ban and Delete account. Your edits don’t show “edited”.</p></div>
+    <div class="card"><h3>Banned users</h3><div id="bl" class="note">Loading…</div></div>`);
+  const load = async () => {
+    const { data = [] } = await sb.from('profiles').select('id,username').eq('banned', true);
+    const bl = $('#bl'); bl.innerHTML = data.length ? '' : 'Nobody is banned.';
+    for (const u of data) {
+      const r = document.createElement('div');
+      r.className = 'row'; r.style.marginBottom = '8px';
+      r.innerHTML = `<span>${esc(u.username)}</span><button>Unban</button>`;
+      r.querySelector('button').onclick = async () => {
+        const { error } = await sb.rpc('unban_user', { uid: u.id });
+        error ? alert(error.message) : load();
+      };
+      bl.append(r);
+    }
+  };
+  load();
+}
+</script></body></html>

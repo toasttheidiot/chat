@@ -1,45 +1,66 @@
 const sb = supabase.createClient(new URL(SUPABASE_URL.trim()).origin, SUPABASE_ANON_KEY.trim());
 const $ = (s, r = document) => r.querySelector(s);
 const esc = s => String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-let me, profile, sub;
+let me, profile, sub, isMod = false;
+
+const setTheme = t => { try { localStorage.setItem('theme', t); } catch {} document.documentElement.dataset.theme = t; };
+addEventListener('storage', e => { if (e.key === 'theme') document.documentElement.dataset.theme = e.newValue || 'dark'; });
+
+function paintAvatar(el, p) {
+  el.textContent = ''; el.style.backgroundImage = '';
+  if (p.avatar_url) el.style.backgroundImage = `url(${JSON.stringify(p.avatar_url)})`;
+  else el.textContent = p.username[0].toUpperCase();
+}
+
+function showBan() {
+  const g = document.createElement('div');
+  g.className = 'gate'; g.style.zIndex = 100;
+  g.innerHTML = `<div class="ban"><h2>You are banned</h2><p>${esc(BAN_MESSAGE)}</p><a href="${esc(BAN_BUTTON_URL)}">${esc(BAN_BUTTON_TEXT)}</a></div>`;
+  document.body.append(g);
+  return new Promise(() => {});
+}
 
 function login() {
   const g = document.createElement('div');
   g.className = 'gate';
-  g.innerHTML = `<form><h2>Sign in</h2><input name="u" placeholder="Username (new accounts only)">
-    <input name="e" type="email" placeholder="Email" required><input name="p" type="password" placeholder="Password" required>
-    <button value="in">Sign in</button><button value="up" type="button">Create account</button><p></p></form>`;
+  g.innerHTML = `<form><h2>Sign in</h2><input name="u" placeholder="Username" autocomplete="username" required>
+    <input name="p" type="password" placeholder="Password" autocomplete="current-password" required>
+    <button>Sign in</button><p></p></form>`;
   document.body.append(g);
   const f = $('form', g), msg = $('p', g);
-  const go = async up => {
+  f.onsubmit = async e => {
+    e.preventDefault();
     msg.textContent = '';
-    const email = f.e.value, password = f.p.value;
-    const r = up
-      ? await sb.auth.signUp({ email, password, options: { data: { username: f.u.value.trim() } } })
-      : await sb.auth.signInWithPassword({ email, password });
-    if (r.error) return msg.textContent = r.error.message;
-    if (!r.data.session) return msg.textContent = 'Check your email to confirm, then sign in.';
+    const email = f.u.value.trim().toLowerCase() + '@gmail.com';
+    const { error } = await sb.auth.signInWithPassword({ email, password: f.p.value });
+    if (error) return msg.textContent = error.message;
     location.reload();
   };
-  f.onsubmit = e => { e.preventDefault(); go(false); };
-  $('[type=button]', g).onclick = () => go(true);
   return new Promise(() => {});
 }
 
-// page: 'home' | 'dms' | 'rooms'
-async function boot(page) {
+// Signs in, loads your profile, blocks banned users. Used by every page.
+async function auth() {
   const { data: { session } } = await sb.auth.getSession();
   if (!session) await login();
   me = session.user;
   const { data: p } = await sb.from('profiles').select('*').eq('id', me.id).single();
-  profile = p || { username: me.email, description: '' };
-  const pfp = profile.avatar_url ? `style="background-image:url('${esc(profile.avatar_url)}')"` : '';
+  if (!p) { await sb.auth.signOut(); location.reload(); return new Promise(() => {}); }
+  profile = p;
+  if (profile.banned) await showBan();
+  isMod = !!(await sb.rpc('is_mod')).data;
+}
+
+// page: 'home' | 'dms' | 'rooms'
+async function boot(page) {
+  await auth();
   $('#side').innerHTML = `
-    <div class="prof"><div class="pfp" ${pfp}>${profile.avatar_url ? '' : esc(profile.username[0].toUpperCase())}</div>
+    <div class="prof"><div class="pfp"></div>
       <a class="who" href="index.html"><b>${esc(profile.username)}</b><small>${esc(profile.description || 'No description yet')}</small></a>
-      <button class="cog" title="Settings" onclick="alert('Settings coming soon')">&#9881;</button></div>
+      <a class="cog" href="settings.html" target="_blank" rel="noopener" title="Settings">&#9881;</a></div>
     <div class="tabs"><a href="dms.html" class="${page === 'dms' ? 'on' : ''}">DMs</a><a href="rooms.html" class="${page === 'rooms' ? 'on' : ''}">Rooms</a></div>
     <div id="list"></div><div class="foot"></div>`;
+  paintAvatar($('.pfp'), profile);
   if (page === 'home') $('#top').hidden = true;
 }
 
@@ -62,22 +83,99 @@ function list(items, selected, onPick, emptyText) {
   }
 }
 
+const closeMenu = () => $('.ctx')?.remove();
+addEventListener('click', closeMenu);
+addEventListener('keydown', e => e.key === 'Escape' && closeMenu());
+addEventListener('scroll', closeMenu, true);
+function ctxMenu(x, y, items) {
+  closeMenu();
+  const m = document.createElement('div');
+  m.className = 'ctx';
+  for (const [t, fn, bad] of items) {
+    const b = document.createElement('button');
+    if (bad) b.className = 'danger';
+    b.textContent = t; b.onclick = () => { closeMenu(); fn(); };
+    m.append(b);
+  }
+  m.style.left = Math.min(x, innerWidth - 160) + 'px';
+  m.style.top = Math.min(y, innerHeight - 90) + 'px';
+  document.body.append(m);
+}
+
 async function openChat(table, col, val) {
   const el = $('#content');
   el.innerHTML = `<div class="msgs"></div><form class="send"><input placeholder="Type a message" autocomplete="off" maxlength="2000"><button>Send</button></form>`;
   const box = $('.msgs', el), names = {};
   const nm = async id => names[id] ??= (await sb.from('profiles').select('username').eq('id', id).single()).data?.username || 'unknown';
+  const find = id => box.querySelector(`[data-id="${id}"]`);
+  const setEdited = (d, m) => {
+    $('.txt', d).textContent = m.content;
+    if (m.edited_at && !$('i', d)) $('small', d).insertAdjacentHTML('beforeend', ' <i>edited</i>');
+  };
   const add = async m => {
     const d = document.createElement('div');
-    d.className = 'msg';
-    d.innerHTML = `<b>${esc(await nm(m.user_id))}</b><small>${new Date(m.created_at).toLocaleString()}</small><div>${esc(m.content)}</div>`;
+    d.className = 'msg'; d.dataset.id = m.id; d.dataset.user = m.user_id;
+    d.innerHTML = `<b>${esc(await nm(m.user_id))}</b><small>${new Date(m.created_at).toLocaleString()}${m.edited_at ? ' <i>edited</i>' : ''}</small><div class="txt">${esc(m.content)}</div>`;
     box.append(d); box.scrollTop = box.scrollHeight;
   };
+
+  const edit = d => {
+    const txt = $('.txt', d), old = txt.textContent;
+    const i = document.createElement('input');
+    i.className = 'editbox'; i.value = old; i.maxLength = 2000;
+    txt.replaceChildren(i); i.focus();
+    let done = false;
+    const finish = async save => {
+      if (done) return; done = true;
+      const v = i.value.trim();
+      if (!save || !v || v === old) return void (txt.textContent = old);
+      const { data, error } = await sb.from(table).update(isMod ? { content: v } : { content: v, edited_at: new Date().toISOString() }).eq('id', d.dataset.id).select().single();
+      if (error) { alert(error.message); txt.textContent = old; return; }
+      setEdited(d, data);
+    };
+    i.onkeydown = e => { if (e.key === 'Enter') finish(true); if (e.key === 'Escape') finish(false); };
+    i.onblur = () => finish(false);
+  };
+  const del = async d => {
+    if (!confirm('Delete this message?')) return;
+    const { error } = await sb.from(table).delete().eq('id', d.dataset.id);
+    if (error) return alert(error.message);
+    d.remove();
+  };
+  const who = d => ({ id: d.dataset.user, name: $('b', d).textContent });
+  const ban = async d => {
+    const t = who(d);
+    if (!confirm(`Ban ${t.name}?`)) return;
+    const { error } = await sb.rpc('ban_user', { uid: t.id });
+    alert(error ? error.message : `${t.name} is banned.`);
+  };
+  const nuke = async d => {
+    const t = who(d);
+    if (!confirm(`Permanently delete ${t.name}’s account and all their messages?`)) return;
+    const { error } = await sb.rpc('mod_delete_account', { uid: t.id });
+    if (error) return alert(error.message);
+    box.querySelectorAll(`[data-user="${t.id}"]`).forEach(x => x.remove());
+  };
+  box.oncontextmenu = e => {
+    const d = e.target.closest('.msg');
+    if (!d) return;
+    const own = d.dataset.user === me.id;
+    if (!own && !isMod) return; // others only get the normal browser menu
+    e.preventDefault();
+    const items = [['Edit', () => edit(d)], ['Delete', () => del(d), true]];
+    if (isMod && !own) items.push(['Ban', () => ban(d), true], ['Delete account', () => nuke(d), true]);
+    ctxMenu(e.clientX, e.clientY, items);
+  };
+
   const { data } = await sb.from(table).select('*').eq(col, val).order('created_at', { ascending: false }).limit(100);
   for (const m of (data || []).reverse()) await add(m);
   if (sub) sb.removeChannel(sub);
-  sub = sb.channel(`${table}-${val}`).on('postgres_changes',
-    { event: 'INSERT', schema: 'public', table, filter: `${col}=eq.${val}` }, p => add(p.new)).subscribe();
+  const filter = `${col}=eq.${val}`;
+  sub = sb.channel(`${table}-${val}`)
+    .on('postgres_changes', { event: 'INSERT', schema: 'public', table, filter }, p => add(p.new))
+    .on('postgres_changes', { event: 'UPDATE', schema: 'public', table, filter }, p => { const d = find(p.new.id); if (d) setEdited(d, p.new); })
+    .on('postgres_changes', { event: 'DELETE', schema: 'public', table }, p => find(p.old.id)?.remove())
+    .subscribe();
   $('form', el).onsubmit = async e => {
     e.preventDefault();
     const i = e.target.firstElementChild, t = i.value.trim();

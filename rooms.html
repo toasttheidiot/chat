@@ -1,4 +1,4 @@
-<!doctype html><html lang="en"><head><title>Rooms</title><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="style.css"></head><body>
+<!doctype html><html lang="en"><head><title>Rooms</title><meta charset="utf-8"><script>try{document.documentElement.dataset.theme=localStorage.getItem("theme")||"dark"}catch(e){}</script><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="style.css"></head><body>
 <div id="app"><aside id="side"></aside><section id="right"><header id="top"></header><div id="row"><nav id="chan" hidden></nav><main id="content"></main></div></section></div>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script><script src="config.js"></script><script src="app.js"></script>
 <script>
@@ -11,7 +11,7 @@ async function loadRooms() {
   const items = data.map(r => ({ id: r.rooms.id, label: r.rooms.name, sub: 'ID: ' + r.rooms.id }));
   list(items, room?.id, pickRoom, 'No rooms yet. Create one or join with an ID.');
 }
-async function pickRoom(it) {
+async function pickRoom(it, openId) {
   room = it; channel = null;
   loadRooms();
   $('#top').innerHTML = esc(it.label) + ' <small>ID: ' + esc(it.id) + '</small>';
@@ -19,13 +19,25 @@ async function pickRoom(it) {
   const { data = [] } = await sb.from('channels').select('*').eq('room_id', it.id).order('created_at');
   const nav = $('#chan');
   nav.hidden = false; nav.innerHTML = '';
+  const add = document.createElement('button');
+  add.className = 'item add'; add.textContent = '+ Create channel';
+  add.onclick = async () => {
+    const n = prompt('Channel name:');
+    if (!n) return;
+    const { data: id, error } = await sb.rpc('create_channel', { rid: it.id, cname: n });
+    if (error) return alert(error.message);
+    pickRoom(it, id);
+  };
+  nav.append(add);
+  const btns = {};
   for (const c of data) {
     const b = document.createElement('button');
     b.className = 'item'; b.textContent = '# ' + c.name;
     b.onclick = () => pickChannel(c, nav, b);
-    nav.append(b);
+    nav.append(b); btns[c.id] = b;
   }
-  if (data[0]) pickChannel(data[0], nav, nav.firstChild);
+  const first = data.find(c => c.id === openId) || data[0];
+  if (first) pickChannel(first, nav, btns[first.id]);
 }
 function pickChannel(c, nav, btn) {
   nav.querySelectorAll('.item').forEach(x => x.classList.remove('on'));

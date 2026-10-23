@@ -67,3 +67,9 @@ label{display:grid;gap:6px;margin:14px 0;color:var(--mute);font-size:13px}textar
 .pick .grid{overflow:auto;display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:6px;min-height:120px;align-content:start;color:var(--mute)}
 .pick .grid img{width:100%;height:100px;object-fit:cover;border-radius:8px;cursor:pointer}
 .pick small{color:var(--mute)}
+
+div.item{cursor:pointer}.item:not(.on):hover{background:var(--hover)}.item.drag{opacity:.4}
+.send.locked{color:var(--mute);justify-content:center;font-size:13px}
+.chk{display:flex;align-items:center;gap:10px;color:var(--text);font-size:14px;margin:6px 0}
+.chk input{width:18px;height:18px;padding:0;flex:none;accent-color:var(--mute)}
+.dlg h3{margin:0}.dlg label{margin:6px 0}.dlg .row{justify-content:flex-end}

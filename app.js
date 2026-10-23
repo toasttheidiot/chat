@@ -137,12 +137,23 @@ function ctxMenu(x, y, items) {
 async function openChat(table, col, val, opts = {}) {
   const el = $('#content');
   el.innerHTML = `<div class="msgs"></div>` + (opts.locked ? '<div class="send locked">Only the room owner and people they allow can type in this channel.</div>' : `<form class="send"><input placeholder="Type a message" autocomplete="off" maxlength="2000"><button type="button" class="plus" title="Add an image or GIF">+</button><button>Send</button></form>`);
-  const box = $('.msgs', el), names = {};
-  const nm = async id => names[id] ??= (await sb.from('profiles').select('username').eq('id', id).single()).data?.username || 'unknown';
+  const box = $('.msgs', el), profs = {};
+  const pf = id => profs[id] ??= sb.from('profiles').select('username,avatar_url').eq('id', id).single().then(r => r.data || { username: 'unknown' });
+  // A message hides its name/picture/time when the same person wrote the one before it less than an hour earlier
+  const layout = () => {
+    let prev = null;
+    for (const d of box.children) {
+      d.classList.toggle('grp', !!prev && prev.dataset.user === d.dataset.user && d.dataset.t - prev.dataset.t < 3600000);
+      prev = d;
+    }
+  };
   const find = id => box.querySelector(`[data-id="${id}"]`);
   const setEdited = (d, m) => {
     $('.txt', d).textContent = m.content;
-    if (m.edited_at && !$('i', d)) $('small', d).insertAdjacentHTML('beforeend', ' <i>edited</i>');
+    if (m.edited_at && !$('.eu', d)) {
+      $('.head small', d).insertAdjacentHTML('beforeend', ' <i>edited</i>');
+      $('.body', d).insertAdjacentHTML('beforeend', '<i class="eu">edited</i>');
+    }
   };
   const att = m => m.image_url && /^https:\/\//.test(m.image_url)
     ? `<a href="${esc(m.image_url)}" target="_blank" rel="noopener"><img class="att" src="${esc(m.image_url)}" alt="image" loading="lazy"></a>` : '';
@@ -195,10 +206,12 @@ async function openChat(table, col, val, opts = {}) {
     load(''); input.focus();
   };
   const add = async m => {
+    const p = await pf(m.user_id);
     const d = document.createElement('div');
-    d.className = 'msg'; d.dataset.id = m.id; d.dataset.user = m.user_id;
-    d.innerHTML = `<b>${esc(await nm(m.user_id))}</b><small>${new Date(m.created_at).toLocaleString()}${m.edited_at ? ' <i>edited</i>' : ''}</small><div class="txt">${esc(m.content)}</div>${att(m)}`;
-    box.append(d); box.scrollTop = box.scrollHeight;
+    d.className = 'msg'; d.dataset.id = m.id; d.dataset.user = m.user_id; d.dataset.t = new Date(m.created_at).getTime();
+    d.innerHTML = `<div class="pfp sm"></div><div class="body"><div class="head"><b>${esc(p.username)}</b><small>${new Date(m.created_at).toLocaleString()}${m.edited_at ? ' <i>edited</i>' : ''}</small></div><div class="txt">${esc(m.content)}</div>${att(m)}${m.edited_at ? '<i class="eu">edited</i>' : ''}</div>`;
+    paintAvatar($('.pfp', d), p);
+    box.append(d); layout(); box.scrollTop = box.scrollHeight;
     $('img', d)?.addEventListener('load', () => box.scrollTop = box.scrollHeight);
   };
 
@@ -223,7 +236,7 @@ async function openChat(table, col, val, opts = {}) {
     if (!confirm('Delete this message?')) return;
     const { error } = await sb.from(table).delete().eq('id', d.dataset.id);
     if (error) return alert(error.message);
-    d.remove();
+    d.remove(); layout();
   };
   const who = d => ({ id: d.dataset.user, name: $('b', d).textContent });
   const ban = async d => {
@@ -238,11 +251,39 @@ async function openChat(table, col, val, opts = {}) {
     const { error } = await sb.rpc('mod_delete_account', { uid: t.id });
     if (error) return alert(error.message);
     box.querySelectorAll(`[data-user="${t.id}"]`).forEach(x => x.remove());
+    layout();
   };
   const rm = opts.room;
-  const setPerm = async (uid, perm, val) => {
-    const { error } = await sb.rpc('set_member_perm', { rid: rm.id, uid, perm, val });
-    alert(error ? error.message : 'Permission updated.');
+  const PERMS = [
+    ['can_talk', 'Talk everywhere', 'Can type in read-only channels.'],
+    ['can_kick', 'Kick members', 'Can remove people from this room.'],
+    ['can_channels', 'Create channels', 'Can add new channels.']
+  ];
+  const permDialog = async uid => {
+    const [prof, { data: p }] = await Promise.all([pf(uid),
+      sb.from('room_members').select('can_talk,can_kick,can_channels').eq('room_id', rm.id).eq('user_id', uid).maybeSingle()]);
+    if (!p) return alert('That person is no longer in this room.');
+    const m = document.createElement('div');
+    m.className = 'modal';
+    m.innerHTML = `<div class="pick dlg" style="width:min(420px,92vw)"><div class="phead"><div class="pfp" style="width:64px;height:64px;font-size:24px"></div><h3></h3></div>
+      ${PERMS.map(([k, t, sub]) => `<div class="prow"><div><b>${t}</b><div class="note">${sub}</div></div><input type="checkbox" class="sw" data-k="${k}"></div>`).join('')}
+      <p class="note pmsg"></p><div class="pfoot"><button class="x">Done</button></div></div>`;
+    document.body.append(m);
+    $('h3', m).textContent = prof.username;
+    paintAvatar($('.pfp', m), prof);
+    const onKey = e => e.key === 'Escape' && close();
+    const close = () => { m.remove(); removeEventListener('keydown', onKey); };
+    addEventListener('keydown', onKey);
+    m.onclick = e => { if (e.target === m) close(); };
+    $('.x', m).onclick = close;
+    for (const sw of m.querySelectorAll('input[data-k]')) {
+      sw.checked = !!p[sw.dataset.k];
+      sw.onchange = async () => {
+        const { error } = await sb.rpc('set_member_perm', { rid: rm.id, uid, perm: sw.dataset.k, val: sw.checked });
+        if (error) { sw.checked = !sw.checked; $('.pmsg', m).textContent = error.message; }
+        else $('.pmsg', m).textContent = 'Saved.';
+      };
+    }
   };
   const kick = async d => {
     const t = who(d);
@@ -260,13 +301,7 @@ async function openChat(table, col, val, opts = {}) {
     const x = e.clientX, y = e.clientY, items = [];
     if (own || isMod) items.push(['Edit', () => edit(d)], ['Delete', () => del(d), true]);
     if (roomActions) {
-      if (rm.isOwner) {
-        const { data: p } = await sb.from('room_members').select('can_talk,can_kick,can_channels').eq('room_id', rm.id).eq('user_id', uid).maybeSingle();
-        items.push(
-          [p?.can_talk ? 'Stop allowing talking everywhere' : 'Allow talking everywhere', () => setPerm(uid, 'can_talk', !p?.can_talk)],
-          [p?.can_kick ? 'Stop allowing kicking' : 'Allow kicking', () => setPerm(uid, 'can_kick', !p?.can_kick)],
-          [p?.can_channels ? 'Stop allowing creating channels' : 'Allow creating channels', () => setPerm(uid, 'can_channels', !p?.can_channels)]);
-      }
+      if (rm.isOwner) items.push(['Edit permissions', () => permDialog(uid)]);
       items.push(['Kick from room', () => kick(d), true]);
     }
     if (isMod && !own) items.push(['Ban', () => ban(d), true], ['Delete account', () => nuke(d), true]);
@@ -280,7 +315,7 @@ async function openChat(table, col, val, opts = {}) {
   sub = sb.channel(`${table}-${val}`)
     .on('postgres_changes', { event: 'INSERT', schema: 'public', table, filter }, p => add(p.new))
     .on('postgres_changes', { event: 'UPDATE', schema: 'public', table, filter }, p => { const d = find(p.new.id); if (d) setEdited(d, p.new); })
-    .on('postgres_changes', { event: 'DELETE', schema: 'public', table }, p => find(p.old.id)?.remove())
+    .on('postgres_changes', { event: 'DELETE', schema: 'public', table }, p => { find(p.old.id)?.remove(); layout(); })
     .subscribe();
   if (!opts.locked) {
   $('.plus', el).onclick = e => {

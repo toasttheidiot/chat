@@ -33,7 +33,9 @@ function login() {
     msg.textContent = '';
     const email = f.u.value.trim().toLowerCase() + '@gmail.com';
     const { error } = await sb.auth.signInWithPassword({ email, password: f.p.value });
-    if (error) return msg.textContent = error.message;
+    if (error) return msg.textContent = /fetch/i.test(error.message)
+      ? 'Cannot reach Supabase. Check SUPABASE_URL in config.js, that your project is not paused, and that no ad blocker is blocking supabase.co.'
+      : error.message;
     location.reload();
   };
   return new Promise(() => {});
@@ -104,7 +106,7 @@ function ctxMenu(x, y, items) {
 
 async function openChat(table, col, val) {
   const el = $('#content');
-  el.innerHTML = `<div class="msgs"></div><form class="send"><input placeholder="Type a message" autocomplete="off" maxlength="2000"><button>Send</button></form>`;
+  el.innerHTML = `<div class="msgs"></div><form class="send"><input placeholder="Type a message" autocomplete="off" maxlength="2000"><button type="button" class="plus" title="Add an image or GIF">+</button><button>Send</button></form>`;
   const box = $('.msgs', el), names = {};
   const nm = async id => names[id] ??= (await sb.from('profiles').select('username').eq('id', id).single()).data?.username || 'unknown';
   const find = id => box.querySelector(`[data-id="${id}"]`);
@@ -112,11 +114,62 @@ async function openChat(table, col, val) {
     $('.txt', d).textContent = m.content;
     if (m.edited_at && !$('i', d)) $('small', d).insertAdjacentHTML('beforeend', ' <i>edited</i>');
   };
+  const att = m => m.image_url && /^https:\/\//.test(m.image_url)
+    ? `<a href="${esc(m.image_url)}" target="_blank" rel="noopener"><img class="att" src="${esc(m.image_url)}" alt="image" loading="lazy"></a>` : '';
+  const send = async (content, image_url) => {
+    const { error } = await sb.from(table).insert({ [col]: val, user_id: me.id, content, ...(image_url ? { image_url } : {}) });
+    if (error) alert(error.message);
+  };
+  const pickImage = () => {
+    const f = document.createElement('input');
+    f.type = 'file'; f.accept = 'image/png,image/jpeg,image/gif,image/webp';
+    f.onchange = async () => {
+      const file = f.files[0];
+      if (!file) return;
+      if (!/^image\/(png|jpeg|gif|webp)$/.test(file.type)) return alert('Only images can be sent (PNG, JPG, GIF or WebP).');
+      if (file.size > 5 * 1024 * 1024) return alert('Images must be under 5 MB.');
+      const path = `${me.id}/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${file.type.split('/')[1].replace('jpeg', 'jpg')}`;
+      const up = await sb.storage.from('chat-images').upload(path, file, { contentType: file.type });
+      if (up.error) return alert(up.error.message);
+      send('', sb.storage.from('chat-images').getPublicUrl(path).data.publicUrl);
+    };
+    f.click();
+  };
+  const gifPicker = () => {
+    if (typeof GIPHY_API_KEY === 'undefined' || !GIPHY_API_KEY) return alert('Add your Giphy API key as GIPHY_API_KEY in config.js first.');
+    const m = document.createElement('div');
+    m.className = 'modal';
+    m.innerHTML = '<div class="pick"><input placeholder="Search GIFs"><div class="grid"></div><small>Powered by GIPHY</small></div>';
+    document.body.append(m);
+    const input = $('input', m), grid = $('.grid', m);
+    const onKey = e => e.key === 'Escape' && close();
+    const close = () => { m.remove(); removeEventListener('keydown', onKey); };
+    addEventListener('keydown', onKey);
+    m.onclick = e => { if (e.target === m) close(); };
+    const load = async q => {
+      grid.textContent = 'Loading…';
+      try {
+        const ep = q ? `search?q=${encodeURIComponent(q)}&` : 'trending?';
+        const r = await (await fetch(`https://api.giphy.com/v1/gifs/${ep}api_key=${GIPHY_API_KEY}&limit=24&rating=pg-13`)).json();
+        grid.textContent = r.data?.length ? '' : 'No GIFs found.';
+        for (const g of r.data || []) {
+          const i = document.createElement('img');
+          i.src = g.images.fixed_height_small.url; i.alt = g.title;
+          i.onclick = () => { close(); send('', g.images.fixed_height.url); };
+          grid.append(i);
+        }
+      } catch { grid.textContent = 'Could not reach Giphy.'; }
+    };
+    let t;
+    input.oninput = () => { clearTimeout(t); t = setTimeout(() => load(input.value.trim()), 400); };
+    load(''); input.focus();
+  };
   const add = async m => {
     const d = document.createElement('div');
     d.className = 'msg'; d.dataset.id = m.id; d.dataset.user = m.user_id;
-    d.innerHTML = `<b>${esc(await nm(m.user_id))}</b><small>${new Date(m.created_at).toLocaleString()}${m.edited_at ? ' <i>edited</i>' : ''}</small><div class="txt">${esc(m.content)}</div>`;
+    d.innerHTML = `<b>${esc(await nm(m.user_id))}</b><small>${new Date(m.created_at).toLocaleString()}${m.edited_at ? ' <i>edited</i>' : ''}</small><div class="txt">${esc(m.content)}</div>${att(m)}`;
     box.append(d); box.scrollTop = box.scrollHeight;
+    $('img', d)?.addEventListener('load', () => box.scrollTop = box.scrollHeight);
   };
 
   const edit = d => {
@@ -176,12 +229,16 @@ async function openChat(table, col, val) {
     .on('postgres_changes', { event: 'UPDATE', schema: 'public', table, filter }, p => { const d = find(p.new.id); if (d) setEdited(d, p.new); })
     .on('postgres_changes', { event: 'DELETE', schema: 'public', table }, p => find(p.old.id)?.remove())
     .subscribe();
-  $('form', el).onsubmit = async e => {
+  $('.plus', el).onclick = e => {
+    e.stopPropagation();
+    const r = e.currentTarget.getBoundingClientRect();
+    ctxMenu(r.left - 60, r.top - 90, [['Upload image', pickImage], ['Search GIFs', gifPicker]]);
+  };
+  $('form', el).onsubmit = e => {
     e.preventDefault();
-    const i = e.target.firstElementChild, t = i.value.trim();
+    const i = $('input', e.target), t = i.value.trim();
     if (!t) return;
     i.value = '';
-    const { error } = await sb.from(table).insert({ [col]: val, user_id: me.id, content: t });
-    if (error) alert(error.message);
+    send(t);
   };
 }

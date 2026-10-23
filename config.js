@@ -6,3 +6,5 @@ const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBh
 const BAN_MESSAGE = "You are banned. If you think this was a mistake please complete the appeal form";
 const BAN_BUTTON_TEXT = "Appeal";
 const BAN_BUTTON_URL = "https://forms.gle/wYALy7ar3Mu5uewm6";
+
+const GIPHY_API_KEY = "sh6I4cQ4FteMeAIXO2s8P8pzStEV1LDQ";

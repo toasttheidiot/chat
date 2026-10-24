@@ -41,8 +41,16 @@ function login() {
   return new Promise(() => {});
 }
 
+function showNoBeta() {
+  const g = document.createElement('div');
+  g.className = 'gate'; g.style.zIndex = 100;
+  g.innerHTML = '<div class="ban"><h2>Beta testers only</h2><p>Your account doesn’t have access to the beta.</p><a href="../index.html">Back to the app</a></div>';
+  document.body.append(g);
+  return new Promise(() => {});
+}
+
 // Signs in, loads your profile, blocks banned users. Used by every page.
-async function auth() {
+async function auth(allowMods = false) {
   const { data: { session } } = await sb.auth.getSession();
   if (!session) await login();
   me = session.user;
@@ -52,16 +60,18 @@ async function auth() {
   if (profile.banned) await showBan();
   isMod = !!(await sb.rpc('is_mod')).data;
   isBeta = !!(await sb.rpc('is_beta')).data;
+  if (!isBeta && !(allowMods && isMod)) await showNoBeta(); // beta pages are for beta testers only
 }
 
 // page: 'home' | 'dms' | 'rooms'
 async function boot(page) {
-  await auth();
+  await auth(page === 'changes'); // mods may open the changelog page without being beta testers
+  document.head.insertAdjacentHTML('beforeend', '<style>.tabs{gap:8px;padding:14px 8px}.tabs a{padding:7px 14px}</style>');
   $('#side').innerHTML = `
-    <div class="prof"><div class="pfp"></div>
+    <div class="betatag">BETA</div><div class="prof"><div class="pfp"></div>
       <a class="who" href="index.html"><b>${esc(profile.username)}</b><small>${esc(profile.description || 'No description yet')}</small></a>
-      <a class="cog" href="settings.html" target="_blank" rel="noopener" title="Settings">&#9881;</a></div>
-    <div class="tabs"><a href="dms.html" class="${page === 'dms' ? 'on' : ''}">DMs</a><a href="rooms.html" class="${page === 'rooms' ? 'on' : ''}">Rooms</a></div>
+      <a class="cog" href="../settings.html" target="_blank" rel="noopener" title="Settings">&#9881;</a></div>
+    <div class="tabs"><a href="dms.html" class="${page === 'dms' ? 'on' : ''}">DMs</a><a href="rooms.html" class="${page === 'rooms' ? 'on' : ''}">Rooms</a><a href="changes.html" class="${page === 'changes' ? 'on' : ''}">Changes</a></div>
     <div id="list"></div><div class="foot"></div>`;
   paintAvatar($('.pfp'), profile);
   if (page === 'home') $('#top').hidden = true;

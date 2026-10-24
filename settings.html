@@ -52,18 +52,14 @@ function userInfo() {
   $('#save').onclick = async () => {
     const un = $('#un').value.trim().toLowerCase(), ds = $('#ds').value.trim(), old = profile.username;
     if (!/^[^\s@]{2,30}$/.test(un)) return say('Username must be 2–30 characters with no spaces or @.');
-    const { error } = await sb.from('profiles').update({ username: un, description: ds }).eq('id', me.id);
-    if (error) return say(error.code === '23505' ? 'That username is taken.' : error.message);
     if (un !== old) {
-      const email = un + '@gmail.com';
-      const { data, error: e2 } = await sb.auth.updateUser({ email });
-      if (e2 || data.user.email !== email) {
-        await sb.from('profiles').update({ username: old }).eq('id', me.id);
-        return say(e2 ? e2.message : 'Supabase is waiting for an email confirmation, so the username was not changed. Turn off "Confirm email" and "Secure email change" in Authentication settings.');
-      }
-      await sb.auth.refreshSession();
+      const { error: e1 } = await sb.rpc('change_username', { new_name: un });
+      if (e1) return say(e1.message);
+      profile.username = un;
     }
-    profile.username = un; profile.description = ds;
+    const { error } = await sb.from('profiles').update({ description: ds }).eq('id', me.id);
+    if (error) return say(error.message);
+    profile.description = ds;
     say(un !== old ? 'Saved. Use your new username next time you sign in.' : 'Saved.');
   };
 }
@@ -73,14 +69,13 @@ function account() {
     <div class="card"><h3>Sign out</h3><p class="note">Sign out of this device.</p><button id="out">Sign out</button></div>
     <div class="card"><h3>Delete account</h3><p class="note">Permanently deletes your account, profile and messages. This can’t be undone.</p>
       <button id="del" class="danger">Delete my account</button></div>`);
-  $('#out').onclick = async () => { await sb.auth.signOut(); location.href = 'index.html'; };
+  $('#out').onclick = signOutNow;
   $('#del').onclick = async () => {
     if (prompt('Type DELETE to permanently delete your account.') !== 'DELETE') return;
     await sb.storage.from('avatars').remove([`${me.id}/avatar`]);
     const { error } = await sb.rpc('delete_my_account');
     if (error) return alert(error.message);
-    await sb.auth.signOut().catch(() => {});
-    location.href = 'index.html';
+    await signOutNow();
   };
 }
 
@@ -103,7 +98,9 @@ function betaTab() {
 async function moderator() {
   pane.insertAdjacentHTML('beforeend', `
     <div class="card"><h3>Your powers</h3><p class="note">Right-click any message to edit or delete it. On other people’s messages you also get Ban and Delete account. Your edits don’t show “edited”.</p></div>
+    <div class="card"><h3>Beta changelog</h3><p class="note">Create beta updates and write or edit their changelogs.</p><button id="cl">Open beta changelog</button></div>
     <div class="card"><h3>Banned users</h3><div id="bl" class="note">Loading…</div></div>`);
+  $('#cl').onclick = () => window.open('beta/changes.html', '_blank', 'noopener');
   const load = async () => {
     const { data = [] } = await sb.from('profiles').select('id,username').eq('banned', true);
     const bl = $('#bl'); bl.innerHTML = data.length ? '' : 'Nobody is banned.';

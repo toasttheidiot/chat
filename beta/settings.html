@@ -1,142 +1,33 @@
-<!doctype html><html lang="en"><head><meta charset="utf-8"><script>try{document.documentElement.dataset.theme=localStorage.getItem('theme')||'dark'}catch(e){}</script>
-<meta name="viewport" content="width=device-width,initial-scale=1"><title>Settings (beta)</title><link rel="stylesheet" href="../style.css"><style>.badge{width:16px;height:16px;flex:none}</style></head><body>
-<div class="set"><nav id="snav"><h3>Settings</h3></nav><main id="spane"></main></div>
+<!doctype html><html lang="en"><head><title>Direct messages (beta)</title><meta charset="utf-8"><script>try{document.documentElement.dataset.theme=localStorage.getItem("theme")||"dark"}catch(e){}</script><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="../style.css"></head><body>
+<div id="app"><aside id="side"></aside><section id="right"><header id="top"></header><div id="row"><nav id="chan" hidden></nav><main id="content"></main></div></section></div>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script><script src="../config.js"></script><script src="app.js"></script>
 <script>
-const pane = $('#spane'), nav = $('#snav');
-const tabs = { 'User info': userInfo, 'Account': account, 'Display': display };
-const say = t => { const m = $('#msg'); if (m) m.textContent = t; };
+let current = null;
+$('#top').textContent = 'Direct messages';
+$('#content').innerHTML = '<div class="empty"><p>Select a DM from the list.</p></div>';
 
-auth().then(() => {
-  if (isMod) tabs['Moderator'] = moderator;
-  for (const name in tabs) {
-    const b = document.createElement('button');
-    b.className = 'item'; b.textContent = name;
-    b.onclick = () => show(name, b);
-    nav.append(b);
-  }
-  nav.querySelector('.item').click();
-});
-function show(name, b) {
-  nav.querySelectorAll('.item').forEach(x => x.classList.toggle('on', x === b));
-  pane.innerHTML = `<h2>${name}</h2>`;
-  tabs[name]();
+async function loadDms() {
+  const { data: dms = [] } = await sb.from('dms').select('*');
+  const ids = dms.map(d => d.user_a === me.id ? d.user_b : d.user_a);
+  const { data: ps = [] } = ids.length ? await sb.from('profile_badges').select('id,username,badge').in('id', ids) : {};
+  const items = dms.map((d, i) => ({ id: d.id, label: ps.find(p => p.id === ids[i])?.username || 'unknown', badge: ps.find(p => p.id === ids[i])?.badge }));
+  list(await applyOrder(items), current, pick, 'No DMs yet. Use the button below to start one.');
 }
-
-function userInfo() {
-  pane.insertAdjacentHTML('beforeend', `
-    <div class="row l"><div class="pfp big" id="av"></div>
-      <div><button id="pick">Change picture</button><input id="file" type="file" accept="image/*" hidden>
-      <p class="note">PNG, JPG, GIF or WebP, up to 2 MB.</p></div></div>
-    <label>Username<input id="un" maxlength="30"></label>
-    <label>Description<textarea id="ds" rows="3" maxlength="150"></textarea></label>
-    <div class="card" id="bcard" hidden><h3>Badge</h3><p class="note">Choose which badge shows next to your name.</p><div id="bopts"></div></div>
-    <button id="save">Save changes</button><p class="note" id="msg"></p>`);
-  paintAvatar($('#av'), profile);
-  $('#un').value = profile.username;
-  $('#ds').value = profile.description || '';
-  const avail = [isMod && 'mod', isBeta && 'beta'].filter(Boolean);
-  if (avail.length > 1) {
-    $('#bcard').hidden = false;
-    for (const k of avail) {
-      const l = document.createElement('label');
-      l.className = 'chk';
-      l.innerHTML = `<input type="radio" name="bd" value="${k}">${badge(k)}<span>${BADGES[k].name}</span>`;
-      const r = $('input', l);
-      r.checked = profile.badge === k;
-      r.onchange = async () => {
-        const { error } = await sb.rpc('set_badge', { b: k });
-        if (error) return say(error.message);
-        profile.badge = k; say('Badge updated.');
-      };
-      $('#bopts').append(l);
-    }
-  }
-  $('#pick').onclick = () => $('#file').click();
-  $('#file').onchange = async e => {
-    const f = e.target.files[0];
-    if (!f) return;
-    if (!f.type.startsWith('image/')) return say('Please choose an image file.');
-    if (f.size > 2 * 1024 * 1024) return say('The image must be under 2 MB.');
-    const path = `${me.id}/avatar`;
-    const up = await sb.storage.from('avatars').upload(path, f, { upsert: true, contentType: f.type });
-    if (up.error) return say(up.error.message);
-    const url = sb.storage.from('avatars').getPublicUrl(path).data.publicUrl + '?v=' + Date.now();
-    const { error } = await sb.from('profiles').update({ avatar_url: url }).eq('id', me.id);
-    if (error) return say(error.message);
-    profile.avatar_url = url; paintAvatar($('#av'), profile); say('Picture updated.');
-  };
-  $('#save').onclick = async () => {
-    const un = $('#un').value.trim().toLowerCase(), ds = $('#ds').value.trim(), old = profile.username;
-    if (!/^[^\s@]{2,30}$/.test(un)) return say('Username must be 2–30 characters with no spaces or @.');
-    const { error } = await sb.from('profiles').update({ username: un, description: ds }).eq('id', me.id);
-    if (error) return say(error.code === '23505' ? 'That username is taken.' : error.message);
-    if (un !== old) {
-      const email = un + '@gmail.com';
-      const { data, error: e2 } = await sb.auth.updateUser({ email });
-      if (e2 || data.user.email !== email) {
-        await sb.from('profiles').update({ username: old }).eq('id', me.id);
-        return say(e2 ? e2.message : 'Supabase is waiting for an email confirmation, so the username was not changed. Turn off "Confirm email" and "Secure email change" in Authentication settings.');
-      }
-      await sb.auth.refreshSession();
-    }
-    profile.username = un; profile.description = ds;
-    say(un !== old ? 'Saved. Use your new username next time you sign in.' : 'Saved.');
-  };
+function pick(it) {
+  current = it.id;
+  $('#top').innerHTML = esc(it.label) + (it.badge ? badge(it.badge) : '');
+  loadDms();
+  openChat('dm_messages', 'dm_id', it.id);
 }
-
-function account() {
-  pane.insertAdjacentHTML('beforeend', `
-    <div class="card"><h3>Sign out</h3><p class="note">Sign out of this device.</p><button id="out">Sign out</button></div>
-    <div class="card"><h3>Delete account</h3><p class="note">Permanently deletes your account, profile and messages. This can’t be undone.</p>
-      <button id="del" class="danger">Delete my account</button></div>`);
-  $('#out').onclick = async () => { await sb.auth.signOut(); location.href = 'index.html'; };
-  $('#del').onclick = async () => {
-    if (prompt('Type DELETE to permanently delete your account.') !== 'DELETE') return;
-    await sb.storage.from('avatars').remove([`${me.id}/avatar`]);
-    const { error } = await sb.rpc('delete_my_account');
+boot('dms').then(() => {
+  addButton('+ Start a DM', async () => {
+    const u = prompt('Enter their exact username:');
+    if (!u) return;
+    const { data, error } = await sb.rpc('start_dm', { uname: u.trim() });
     if (error) return alert(error.message);
-    await sb.auth.signOut().catch(() => {});
-    location.href = 'index.html';
-  };
-}
-
-function display() {
-  pane.insertAdjacentHTML('beforeend', `
-    <div class="card row"><div><h3>Light mode</h3><p class="note">Use a light color scheme across the whole app.</p></div>
-    <input type="checkbox" class="sw" id="lt"></div>`);
-  $('#lt').checked = document.documentElement.dataset.theme === 'light';
-  $('#lt').onchange = e => setTheme(e.target.checked ? 'light' : 'dark');
-}
-
-function betaTab() {
-  pane.insertAdjacentHTML('beforeend', `
-    <div class="card"><h3>Beta testing</h3>
-      <p class="note">Open the beta version of the app. It may be unfinished or unstable, and it’s only available to beta testers.</p>
-      <button id="beta">Open beta</button></div>`);
-  $('#beta').onclick = () => window.open('beta/index.html', '_blank', 'noopener');
-}
-
-async function moderator() {
-  pane.insertAdjacentHTML('beforeend', `
-    <div class="card"><h3>Your powers</h3><p class="note">Right-click any message to edit or delete it. On other people’s messages you also get Ban and Delete account. Your edits don’t show “edited”.</p></div>
-    <div class="card"><h3>Beta changelog</h3><p class="note">Create beta updates and write or edit their changelogs.</p><button id="cl">Open beta changelog</button></div>
-    <div class="card"><h3>Banned users</h3><div id="bl" class="note">Loading…</div></div>`);
-  $('#cl').onclick = () => window.open('changes.html', '_blank', 'noopener');
-  const load = async () => {
-    const { data = [] } = await sb.from('profiles').select('id,username').eq('banned', true);
-    const bl = $('#bl'); bl.innerHTML = data.length ? '' : 'Nobody is banned.';
-    for (const u of data) {
-      const r = document.createElement('div');
-      r.className = 'row'; r.style.marginBottom = '8px';
-      r.innerHTML = `<span>${esc(u.username)}</span><button>Unban</button>`;
-      r.querySelector('button').onclick = async () => {
-        const { error } = await sb.rpc('unban_user', { uid: u.id });
-        error ? alert(error.message) : load();
-      };
-      bl.append(r);
-    }
-  };
-  load();
-}
+    await loadDms();
+    pick({ id: data, label: u.trim() });
+  });
+  loadDms();
+});
 </script></body></html>

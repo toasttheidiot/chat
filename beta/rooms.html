@@ -1,0 +1,125 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><script>try{document.documentElement.dataset.theme=localStorage.getItem("theme")||"dark"}catch(e){}</script><meta name="viewport" content="width=device-width,initial-scale=1"><title>Rooms (beta)</title><link rel="stylesheet" href="../style.css"></head><body>
+<div id="app"><aside id="side"></aside><section id="right"><header id="top"></header><div id="row"><nav id="chan" hidden></nav><main id="content"></main></div></section></div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script><script src="../config.js"></script><script src="app.js"></script>
+<script>
+let rooms = [], room = null, channel = null;
+const blank = '<div class="empty"><p>Select a room from the list.</p></div>';
+$('#top').textContent = 'Rooms';
+$('#content').innerHTML = blank;
+
+function clearRoom() {
+  room = null; channel = null;
+  $('#chan').hidden = true;
+  $('#top').textContent = 'Rooms';
+  $('#content').innerHTML = blank;
+}
+
+async function loadRooms() {
+  const { data, error } = await sb.from('room_members').select('can_talk,can_kick,can_channels,rooms(id,name,owner_id)').eq('user_id', me.id);
+  if (error) { $('#list').innerHTML = '<div class="hint">Could not load rooms: ' + esc(error.message) + '</div>'; return; }
+  rooms = (data || []).filter(r => r.rooms).map(r => ({
+    id: r.rooms.id, label: r.rooms.name, sub: 'ID: ' + r.rooms.id,
+    owner: r.rooms.owner_id, isOwner: r.rooms.owner_id === me.id, canTalk: r.can_talk, canKick: r.can_kick, canChannels: r.can_channels
+  }));
+  list(await applyOrder(rooms), room?.id, pickRoom, 'No rooms yet. Create one or join with an ID.',
+    (it, e) => ctxMenu(e.clientX, e.clientY, [['Leave room', () => leaveRoom(it), true]]));
+}
+
+async function leaveRoom(it) {
+  const extra = it.isOwner ? ' Ownership passes to another member, or the room is deleted if you are the last one.' : '';
+  if (!confirm(`Leave “${it.label}”?${extra}`)) return;
+  const { error } = await sb.rpc('leave_room', { rid: it.id });
+  if (error) return alert(error.message);
+  if (room?.id === it.id) clearRoom();
+  loadRooms();
+}
+
+function channelDialog(canLock) {
+  return new Promise(res => {
+    const m = document.createElement('div');
+    m.className = 'modal';
+    m.innerHTML = `<form class="pick dlg" style="width:min(400px,92vw)"><h3>Create channel</h3>
+      <label>Channel name<input name="n" maxlength="30" required></label>
+      ${canLock ? '<label class="chk"><input type="checkbox" name="ro"> Read-only: only you and people you give permission to can type</label>' : ''}
+      <div class="row"><button type="button" class="x">Cancel</button><button>Create</button></div></form>`;
+    document.body.append(m);
+    const f = $('form', m);
+    f.n.focus();
+    const done = v => { m.remove(); res(v); };
+    $('.x', m).onclick = () => done(null);
+    m.onclick = e => { if (e.target === m) done(null); };
+    f.onsubmit = e => { e.preventDefault(); done({ name: f.n.value, ro: !!f.ro?.checked }); };
+  });
+}
+
+async function pickRoom(it, openId) {
+  room = it; channel = null;
+  await loadRooms();
+  room = rooms.find(r => r.id === it.id) || it; // fresh permissions
+  $('#top').innerHTML = esc(room.label) + ' <small>ID: ' + esc(room.id) + '</small>';
+  $('#content').innerHTML = '';
+  const { data } = await sb.from('channels').select('*').eq('room_id', room.id).order('created_at');
+  const chans = data || [];
+  const nav = $('#chan');
+  nav.hidden = false; nav.innerHTML = '';
+  const add = document.createElement('button');
+  add.className = 'item add'; add.textContent = '+ Create channel';
+  add.onclick = async () => {
+    const r = await channelDialog(room.isOwner);
+    if (!r || !r.name.trim()) return;
+    const { data: id, error } = await sb.rpc('create_channel', { rid: room.id, cname: r.name, ronly: r.ro });
+    if (error) return alert(error.message);
+    pickRoom(room, id);
+  };
+  if (room.isOwner || room.canChannels) nav.append(add);
+  const btns = {};
+  for (const c of chans) {
+    const b = document.createElement('button');
+    b.className = 'item'; b.textContent = (c.read_only ? '🔒 ' : '# ') + c.name;
+    b.onclick = () => pickChannel(c, nav, b);
+    nav.append(b); btns[c.id] = b;
+  }
+  const first = chans.find(c => c.id === openId) || chans[0];
+  if (first) pickChannel(first, nav, btns[first.id]);
+}
+
+function pickChannel(c, nav, btn) {
+  nav.querySelectorAll('.item').forEach(x => x.classList.remove('on'));
+  btn.classList.add('on');
+  channel = c;
+  const locked = c.read_only && !(room.isOwner || room.canTalk);
+  openChat('room_messages', 'channel_id', c.id, { locked, room });
+}
+
+boot('rooms').then(() => {
+  addButton('+ Create room', async () => {
+    const n = prompt('Room name:');
+    if (!n) return;
+    const { data, error } = await sb.rpc('create_room', { rname: n.trim() });
+    if (error) return alert(error.message);
+    alert('Room created. Share this ID so others can join: ' + data);
+    await loadRooms();
+    pickRoom(rooms.find(r => r.id === data) || { id: data, label: n.trim() });
+  });
+  addButton('Join with ID', async () => {
+    const id = prompt('Enter room ID:');
+    if (!id) return;
+    const { data, error } = await sb.rpc('join_room', { rid: id.trim() });
+    if (error) return alert(error.message);
+    await loadRooms();
+    pickRoom(rooms.find(r => r.id === id.trim()) || { id: id.trim(), label: data });
+  });
+  loadRooms();
+  // Live: you were kicked / left elsewhere, or your permissions changed
+  sb.channel('my-rooms')
+    .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'room_members' }, p => {
+      if (p.old.user_id !== me.id) return;
+      if (room?.id === p.old.room_id) clearRoom();
+      loadRooms();
+    })
+    .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'room_members', filter: `user_id=eq.${me.id}` }, p => {
+      if (room?.id === p.new.room_id) pickRoom(room, channel?.id);
+    })
+    .subscribe();
+});
+</script></body></html>

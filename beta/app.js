@@ -3,6 +3,17 @@ const $ = (s, r = document) => r.querySelector(s);
 const esc = s => String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 let me, profile, sub, isMod = false, isBeta = false;
 
+// Badges: small colored dots with a symbol drawn as SVG (not emoji)
+const BADGES = {
+  mod: { name: 'Moderator', color: '#3b82f6',
+    icon: '<g transform="translate(-.6 .6)"><line x1="4.9" y1="11.6" x2="9.5" y2="7" stroke="#fff" stroke-width="1.6" stroke-linecap="round"/><rect x="7.7" y="5" width="5" height="2.6" rx=".6" fill="#fff" transform="rotate(45 10.2 6.3)"/></g>' },
+  beta: { name: 'Beta tester', color: '#f97316',
+    icon: '<line x1="5.9" y1="3.6" x2="10.1" y2="3.6" stroke="#fff" stroke-width="1.2" stroke-linecap="round"/><path d="M6.8 3.8V10.4a1.2 1.2 0 0 0 2.4 0V3.8" fill="none" stroke="#fff" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/><path d="M6.8 8h2.4v2.4a1.2 1.2 0 0 1-2.4 0z" fill="#fff"/>' }
+};
+const badge = k => BADGES[k]
+  ? `<svg class="badge" viewBox="0 0 16 16" role="img" aria-label="${BADGES[k].name}"><title>${BADGES[k].name}</title><circle cx="8" cy="8" r="8" fill="${BADGES[k].color}"/>${BADGES[k].icon}</svg>`
+  : '';
+
 const setTheme = t => { try { localStorage.setItem('theme', t); } catch {} document.documentElement.dataset.theme = t; };
 addEventListener('storage', e => { if (e.key === 'theme') document.documentElement.dataset.theme = e.newValue || 'dark'; });
 
@@ -60,17 +71,18 @@ async function auth(allowMods = false) {
   if (profile.banned) await showBan();
   isMod = !!(await sb.rpc('is_mod')).data;
   isBeta = !!(await sb.rpc('is_beta')).data;
-  if (!isBeta && !(allowMods && isMod)) await showNoBeta(); // beta pages are for beta testers only
+  if (!isBeta && !(allowMods && isMod)) await showNoBeta();
+  profile.badge = (await sb.from('profile_badges').select('badge').eq('id', me.id).maybeSingle()).data?.badge || null; // beta pages are for beta testers only
 }
 
 // page: 'home' | 'dms' | 'rooms'
 async function boot(page) {
   await auth(page === 'changes'); // mods may open the changelog page without being beta testers
-  document.head.insertAdjacentHTML('beforeend', '<style>.tabs{gap:8px;padding:14px 8px}.tabs a{padding:7px 14px}</style>');
+  document.head.insertAdjacentHTML('beforeend', '<style>.tabs{gap:8px;padding:14px 8px}.tabs a{padding:7px 14px}.badge{width:16px;height:16px;vertical-align:-3px;margin-left:5px;flex:none}</style>');
   $('#side').innerHTML = `
     <div class="betatag">BETA</div><div class="prof"><div class="pfp"></div>
-      <a class="who" href="index.html"><b>${esc(profile.username)}</b><small>${esc(profile.description || 'No description yet')}</small></a>
-      <a class="cog" href="../settings.html" target="_blank" rel="noopener" title="Settings">&#9881;</a></div>
+      <a class="who" href="index.html"><b>${esc(profile.username)}${badge(profile.badge)}</b><small>${esc(profile.description || 'No description yet')}</small></a>
+      <a class="cog" href="settings.html" target="_blank" rel="noopener" title="Settings">&#9881;</a></div>
     <div class="tabs"><a href="dms.html" class="${page === 'dms' ? 'on' : ''}">DMs</a><a href="rooms.html" class="${page === 'rooms' ? 'on' : ''}">Rooms</a><a href="changes.html" class="${page === 'changes' ? 'on' : ''}">Changes</a></div>
     <div id="list"></div><div class="foot"></div>`;
   paintAvatar($('.pfp'), profile);
@@ -101,7 +113,7 @@ function list(items, selected, onPick, emptyText, onMenu) {
     const b = document.createElement('div'); // div, not button: Firefox can’t drag buttons
     b.className = 'item' + (it.id === selected ? ' on' : '');
     b.setAttribute('role', 'button'); b.tabIndex = 0; b.draggable = true; b.dataset.id = it.id;
-    b.innerHTML = esc(it.label) + (it.sub ? `<small>${esc(it.sub)}</small>` : '');
+    b.innerHTML = esc(it.label) + (it.badge ? badge(it.badge) : '') + (it.sub ? `<small>${esc(it.sub)}</small>` : '');
     b.onclick = () => onPick(it);
     b.onkeydown = e => { if (e.key === 'Enter') onPick(it); };
     if (onMenu) b.oncontextmenu = e => { e.preventDefault(); onMenu(it, e); };
@@ -149,7 +161,7 @@ async function openChat(table, col, val, opts = {}) {
   const el = $('#content');
   el.innerHTML = `<div class="msgs"></div>` + (opts.locked ? '<div class="send locked">Only the room owner and people they allow can type in this channel.</div>' : `<form class="send"><input placeholder="Type a message" autocomplete="off" maxlength="2000"><button type="button" class="plus" title="Add an image or GIF">+</button><button>Send</button></form>`);
   const box = $('.msgs', el), profs = {};
-  const pf = id => profs[id] ??= sb.from('profiles').select('username,avatar_url').eq('id', id).single().then(r => r.data || { username: 'unknown' });
+  const pf = id => profs[id] ??= sb.from('profile_badges').select('username,avatar_url,badge').eq('id', id).single().then(r => r.data || { username: 'unknown' });
   // A message hides its name/picture/time when the same person wrote the one before it less than an hour earlier
   const layout = () => {
     let prev = null;
@@ -220,7 +232,7 @@ async function openChat(table, col, val, opts = {}) {
     const p = await pf(m.user_id);
     const d = document.createElement('div');
     d.className = 'msg'; d.dataset.id = m.id; d.dataset.user = m.user_id; d.dataset.t = new Date(m.created_at).getTime();
-    d.innerHTML = `<div class="pfp sm"></div><div class="body"><div class="head"><b>${esc(p.username)}</b><small>${new Date(m.created_at).toLocaleString()}${m.edited_at ? ' <i>edited</i>' : ''}</small></div><div class="txt">${esc(m.content)}</div>${att(m)}${m.edited_at ? '<i class="eu">edited</i>' : ''}</div>`;
+    d.innerHTML = `<div class="pfp sm"></div><div class="body"><div class="head"><b>${esc(p.username)}</b>${badge(p.badge)}<small>${new Date(m.created_at).toLocaleString()}${m.edited_at ? ' <i>edited</i>' : ''}</small></div><div class="txt">${esc(m.content)}</div>${att(m)}${m.edited_at ? '<i class="eu">edited</i>' : ''}</div>`;
     paintAvatar($('.pfp', d), p);
     box.append(d); layout(); box.scrollTop = box.scrollHeight;
     $('img', d)?.addEventListener('load', () => box.scrollTop = box.scrollHeight);
@@ -280,7 +292,7 @@ async function openChat(table, col, val, opts = {}) {
       ${PERMS.map(([k, t, sub]) => `<div class="prow"><div><b>${t}</b><div class="note">${sub}</div></div><input type="checkbox" class="sw" data-k="${k}"></div>`).join('')}
       <p class="note pmsg"></p><div class="pfoot"><button class="x">Done</button></div></div>`;
     document.body.append(m);
-    $('h3', m).textContent = prof.username;
+    $('h3', m).innerHTML = esc(prof.username) + badge(prof.badge);
     paintAvatar($('.pfp', m), prof);
     const onKey = e => e.key === 'Escape' && close();
     const close = () => { m.remove(); removeEventListener('keydown', onKey); };

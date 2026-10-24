@@ -81,3 +81,5 @@ div.item{cursor:pointer}.item:not(.on):hover{background:var(--hover)}.item.drag{
 .chk{display:flex;align-items:center;gap:10px;color:var(--text);font-size:14px;margin:6px 0}
 .chk input{width:18px;height:18px;padding:0;flex:none;accent-color:var(--mute)}
 .dlg h3{margin:0}.dlg label{margin:6px 0}.dlg .row{justify-content:flex-end}
+
+.betatag{background:var(--text);color:var(--bg);font-size:11px;font-weight:700;letter-spacing:.1em;text-align:center;padding:3px}

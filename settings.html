@@ -9,6 +9,7 @@ const say = t => { const m = $('#msg'); if (m) m.textContent = t; };
 
 auth().then(() => {
   if (isMod) tabs['Moderator'] = moderator;
+  if (isBeta) tabs['Beta test'] = betaTab;
   for (const name in tabs) {
     const b = document.createElement('button');
     b.className = 'item'; b.textContent = name;
@@ -89,6 +90,14 @@ function display() {
     <input type="checkbox" class="sw" id="lt"></div>`);
   $('#lt').checked = document.documentElement.dataset.theme === 'light';
   $('#lt').onchange = e => setTheme(e.target.checked ? 'light' : 'dark');
+}
+
+function betaTab() {
+  pane.insertAdjacentHTML('beforeend', `
+    <div class="card"><h3>Beta testing</h3>
+      <p class="note">Open the beta version of the app. It may be unfinished or unstable, and it’s only available to beta testers.</p>
+      <button id="beta">Open beta</button></div>`);
+  $('#beta').onclick = () => window.open('beta/index.html', '_blank', 'noopener');
 }
 
 async function moderator() {

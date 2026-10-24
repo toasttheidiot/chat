@@ -1,7 +1,7 @@
 const sb = supabase.createClient(new URL(SUPABASE_URL.trim()).origin, SUPABASE_ANON_KEY.trim());
 const $ = (s, r = document) => r.querySelector(s);
 const esc = s => String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-let me, profile, sub, isMod = false;
+let me, profile, sub, isMod = false, isBeta = false;
 
 const setTheme = t => { try { localStorage.setItem('theme', t); } catch {} document.documentElement.dataset.theme = t; };
 addEventListener('storage', e => { if (e.key === 'theme') document.documentElement.dataset.theme = e.newValue || 'dark'; });
@@ -51,6 +51,7 @@ async function auth() {
   profile = p;
   if (profile.banned) await showBan();
   isMod = !!(await sb.rpc('is_mod')).data;
+  isBeta = !!(await sb.rpc('is_beta')).data;
 }
 
 // page: 'home' | 'dms' | 'rooms'

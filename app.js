@@ -1,7 +1,7 @@
 const sb = supabase.createClient(new URL(SUPABASE_URL.trim()).origin, SUPABASE_ANON_KEY.trim());
 const $ = (s, r = document) => r.querySelector(s);
 const esc = s => String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-const APP_KIND = 'main'; // main app.js lives in the root folder, beta app.js in /beta
+const APP_KIND = 'main';
 console.info('chat app.js:', APP_KIND, 'v11');
 addEventListener('DOMContentLoaded', () => {
   if ((APP_KIND === 'beta') !== location.pathname.includes('/beta/')) {
@@ -25,13 +25,11 @@ function paintAvatar(el, p) {
   else el.textContent = p.username[0].toUpperCase();
 }
 
-// Sign out for real: clear the session even if the server can’t be reached
 async function signOutNow() {
   try { await sb.auth.signOut({ scope: 'local' }); } catch {}
   try { Object.keys(localStorage).filter(k => k.startsWith('sb-')).forEach(k => localStorage.removeItem(k)); } catch {}
   location.href = 'index.html';
 }
-// Signed out in another tab? Show the sign-in screen here too
 addEventListener('storage', e => {
   if (e.key && e.key.startsWith('sb-') && e.key.endsWith('-auth-token') && !e.newValue) location.reload();
 });
@@ -65,7 +63,6 @@ function login() {
   return new Promise(() => {});
 }
 
-// Signs in, loads your profile, blocks banned users. Used by every page.
 async function auth() {
   const { data: { session } } = await sb.auth.getSession();
   if (!session) await login();
@@ -78,7 +75,6 @@ async function auth() {
   isBeta = !!(await sb.rpc('is_beta')).data;
 }
 
-// page: 'home' | 'dms' | 'rooms'
 async function boot(page) {
   await auth();
   $('#side').innerHTML = `
@@ -105,14 +101,13 @@ async function applyOrder(items) {
   return items.map((it, i) => ({ it, k: pos[it.id] ?? 1e9 + i })).sort((x, y) => x.k - y.k).map(x => x.it);
 }
 
-// Sidebar list: click to open, drag to reorder, optional right-click menu
 function list(items, selected, onPick, emptyText, onMenu) {
   const el = $('#list');
   el.innerHTML = items.length ? '' : `<div class="hint">${emptyText}</div>`;
   const ids = () => [...el.querySelectorAll('.item')].map(x => x.dataset.id);
   let dragged = null, before = '';
   for (const it of items) {
-    const b = document.createElement('div'); // div, not button: Firefox can’t drag buttons
+    const b = document.createElement('div');
     b.className = 'item' + (it.id === selected ? ' on' : '');
     b.setAttribute('role', 'button'); b.tabIndex = 0; b.draggable = true; b.dataset.id = it.id;
     b.innerHTML = esc(it.label) + (it.sub ? `<small>${esc(it.sub)}</small>` : '');
@@ -164,7 +159,6 @@ async function openChat(table, col, val, opts = {}) {
   el.innerHTML = `<div class="msgs"></div>` + (opts.locked ? '<div class="send locked">Only the room owner and people they allow can type in this channel.</div>' : `<form class="send"><input placeholder="Type a message" autocomplete="off" maxlength="2000"><button type="button" class="plus" title="Add an image or GIF">+</button><button>Send</button></form>`);
   const box = $('.msgs', el), profs = {};
   const pf = id => profs[id] ??= sb.from('profiles').select('username,avatar_url').eq('id', id).single().then(r => r.data || { username: 'unknown' });
-  // A message hides its name/picture/time when the same person wrote the one before it less than an hour earlier
   const layout = () => {
     let prev = null;
     for (const d of box.children) {
@@ -321,7 +315,7 @@ async function openChat(table, col, val, opts = {}) {
     if (!d) return;
     const uid = d.dataset.user, own = uid === me.id;
     const roomActions = rm && !own && uid !== rm.owner && (rm.isOwner || rm.canKick);
-    if (!own && !isMod && !roomActions) return; // others only get the normal browser menu
+    if (!own && !isMod && !roomActions) return;
     e.preventDefault();
     const x = e.clientX, y = e.clientY, items = [];
     if (own || isMod) items.push(['Edit', () => edit(d)], ['Delete', () => del(d), true]);

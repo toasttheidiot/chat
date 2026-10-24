@@ -1,28 +1,59 @@
 <!doctype html><html lang="en"><head><meta charset="utf-8"><script>try{document.documentElement.dataset.theme=localStorage.getItem("theme")||"dark"}catch(e){}</script><meta name="viewport" content="width=device-width,initial-scale=1"><title>Rooms (beta)</title><link rel="stylesheet" href="../style.css?v=11"></head><body>
 <div id="app"><aside id="side"></aside><section id="right"><header id="top"></header><div id="row"><nav id="chan" hidden></nav><main id="content"></main></div></section></div>
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script><script src="../config.js"></script><script src="app.js?v=11"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script><script src="../config.js"></script><script src="app.js?v=12"></script>
 <script>
-let rooms = [], room = null, channel = null;
+let rooms = [], room = null, channel = null, chanList = [], mentionCh = {}, mentionRoom = {};
 const blank = '<div class="empty"><p>Select a room from the list.</p></div>';
 $('#top').textContent = 'Rooms';
 $('#content').innerHTML = blank;
 
 function clearRoom() {
-  room = null; channel = null;
+  room = null; channel = null; chanList = [];
   $('#chan').hidden = true;
   $('#top').textContent = 'Rooms';
   $('#content').innerHTML = blank;
 }
 
+// Unread mentions: per channel, and added up per room
+async function loadMentions() {
+  const { data } = await sb.rpc('mention_unread');
+  mentionCh = {}; mentionRoom = {};
+  for (const r of data || []) {
+    mentionCh[r.channel] = Number(r.n);
+    mentionRoom[r.room] = (mentionRoom[r.room] || 0) + Number(r.n);
+  }
+}
+async function renderRooms() {
+  list(await applyOrder(rooms), room?.id, pickRoom, 'No rooms yet. Create one or join with an ID.',
+    (it, e) => ctxMenu(e.clientX, e.clientY, [['Leave room', () => leaveRoom(it), true]]));
+}
+const chanLabel = c => esc((c.read_only ? '🔒 ' : '# ') + c.name) + (mentionCh[c.id] ? dot(mentionCh[c.id]) : '');
+function paintChannelDots() {
+  for (const b of document.querySelectorAll('#chan .item[data-cid]')) {
+    const c = chanList.find(x => x.id === b.dataset.cid);
+    if (c) b.innerHTML = chanLabel(c);
+  }
+}
+async function applyMentions() {
+  await loadMentions();
+  for (const r of rooms) r.count = mentionRoom[r.id] || 0;
+  await renderRooms();
+  paintChannelDots();
+}
+async function markChannelRead(cid) {
+  await sb.rpc('mark_channel_read', { cid });
+  applyMentions();
+}
+
 async function loadRooms() {
-  const { data, error } = await sb.from('room_members').select('can_talk,can_kick,can_channels,rooms(id,name,owner_id)').eq('user_id', me.id);
+  const { data, error } = await sb.from('room_members').select('can_talk,can_kick,can_channels,can_mention_all,rooms(id,name,owner_id)').eq('user_id', me.id);
   if (error) { $('#list').innerHTML = '<div class="hint">Could not load rooms: ' + esc(error.message) + '</div>'; return; }
   rooms = (data || []).filter(r => r.rooms).map(r => ({
     id: r.rooms.id, label: r.rooms.name, sub: 'ID: ' + r.rooms.id,
-    owner: r.rooms.owner_id, isOwner: r.rooms.owner_id === me.id, canTalk: r.can_talk, canKick: r.can_kick, canChannels: r.can_channels
+    owner: r.rooms.owner_id, isOwner: r.rooms.owner_id === me.id,
+    canTalk: r.can_talk, canKick: r.can_kick, canChannels: r.can_channels, canAll: r.can_mention_all
   }));
-  list(await applyOrder(rooms), room?.id, pickRoom, 'No rooms yet. Create one or join with an ID.',
-    (it, e) => ctxMenu(e.clientX, e.clientY, [['Leave room', () => leaveRoom(it), true]]));
+  await applyMentions();
 }
 
 async function leaveRoom(it) {
@@ -59,7 +90,7 @@ async function pickRoom(it, openId) {
   $('#top').innerHTML = esc(room.label) + ' <small>ID: ' + esc(room.id) + '</small>';
   $('#content').innerHTML = '';
   const { data } = await sb.from('channels').select('*').eq('room_id', room.id).order('created_at');
-  const chans = data || [];
+  const chans = chanList = data || [];
   const nav = $('#chan');
   nav.hidden = false; nav.innerHTML = '';
   const add = document.createElement('button');
@@ -75,7 +106,7 @@ async function pickRoom(it, openId) {
   const btns = {};
   for (const c of chans) {
     const b = document.createElement('button');
-    b.className = 'item'; b.textContent = (c.read_only ? '🔒 ' : '# ') + c.name;
+    b.className = 'item'; b.dataset.cid = c.id; b.innerHTML = chanLabel(c);
     b.onclick = () => pickChannel(c, nav, b);
     nav.append(b); btns[c.id] = b;
   }
@@ -89,6 +120,7 @@ function pickChannel(c, nav, btn) {
   channel = c;
   const locked = c.read_only && !(room.isOwner || room.canTalk);
   openChat('room_messages', 'channel_id', c.id, { locked, room });
+  markChannelRead(c.id);
 }
 
 boot('rooms').then(() => {
@@ -121,5 +153,14 @@ boot('rooms').then(() => {
       if (room?.id === p.new.room_id) pickRoom(room, channel?.id);
     })
     .subscribe();
+  // Live: new messages may mention you
+  let t;
+  sb.channel('room-mentions')
+    .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'room_messages' }, async p => {
+      if (p.new.user_id === me.id) return;
+      if (channel && p.new.channel_id === channel.id && !document.hidden) await sb.rpc('mark_channel_read', { cid: channel.id });
+      clearTimeout(t); t = setTimeout(applyMentions, 300);
+    }).subscribe();
+  document.addEventListener('visibilitychange', () => { if (!document.hidden && channel) markChannelRead(channel.id); });
 });
 </script></body></html>

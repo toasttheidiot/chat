@@ -2,7 +2,7 @@ const sb = supabase.createClient(new URL(SUPABASE_URL.trim()).origin, SUPABASE_A
 const $ = (s, r = document) => r.querySelector(s);
 const esc = s => String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const APP_KIND = 'beta'; // main app.js lives in the root folder, beta app.js in /beta
-console.info('chat app.js:', APP_KIND, 'v11');
+console.info('chat app.js:', APP_KIND, 'v12');
 addEventListener('DOMContentLoaded', () => {
   if ((APP_KIND === 'beta') !== location.pathname.includes('/beta/')) {
     const d = document.createElement('div');
@@ -76,6 +76,9 @@ function login() {
   return new Promise(() => {});
 }
 
+const dot = n => `<span class="dot">${n > 99 ? '99+' : n}</span>`;
+const arr = x => Array.isArray(x) ? x : typeof x === 'string' ? x.replace(/[{}]/g, '').split(',').filter(Boolean) : [];
+
 function showNoBeta() {
   const g = document.createElement('div');
   g.className = 'gate'; g.style.zIndex = 100;
@@ -102,7 +105,14 @@ async function auth(allowMods = false) {
 // page: 'home' | 'dms' | 'rooms'
 async function boot(page) {
   await auth(page === 'changes'); // mods may open the changelog page without being beta testers
-  document.head.insertAdjacentHTML('beforeend', '<style>.tabs{gap:8px;padding:14px 8px}.tabs a{padding:7px 14px}.badge{width:16px;height:16px;vertical-align:-3px;margin-left:5px;flex:none}</style>');
+  document.head.insertAdjacentHTML('beforeend', `<style>.tabs{gap:8px;padding:14px 8px}.tabs a{padding:7px 14px}.badge{width:16px;height:16px;vertical-align:-3px;margin-left:5px;flex:none}
+.dot{display:inline-block;min-width:18px;height:18px;line-height:18px;padding:0 5px;border-radius:9px;background:#e53935;color:#fff;font-size:11px;font-weight:700;text-align:center;margin-left:6px;vertical-align:1px}
+.send{position:relative}
+.mpop{position:absolute;left:14px;bottom:100%;margin-bottom:6px;width:min(320px,80%);max-height:220px;overflow:auto;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:4px;box-shadow:0 6px 20px #0008;z-index:15}
+.mopt{padding:7px 10px;border-radius:6px;cursor:pointer}.mopt.on,.mopt:hover{background:var(--sel)}
+.mention{background:rgba(59,130,246,.25);border-radius:4px;padding:0 3px;font-weight:600}
+.msg.mentioned{background:rgba(245,158,11,.12);box-shadow:inset 3px 0 0 #f59e0b;border-radius:4px;margin-left:-10px;margin-right:-8px;padding:2px 8px 2px 10px}
+</style>`);
   $('#side').innerHTML = `
     <div class="betatag">BETA</div><div class="prof"><div class="pfp"></div>
       <a class="who" href="index.html"><b>${esc(profile.username)}${badge(profile.badge)}</b><small>${esc(profile.description || 'No description yet')}</small></a>
@@ -137,7 +147,7 @@ function list(items, selected, onPick, emptyText, onMenu) {
     const b = document.createElement('div'); // div, not button: Firefox can’t drag buttons
     b.className = 'item' + (it.id === selected ? ' on' : '');
     b.setAttribute('role', 'button'); b.tabIndex = 0; b.draggable = true; b.dataset.id = it.id;
-    b.innerHTML = esc(it.label) + (it.badge ? badge(it.badge) : '') + (it.sub ? `<small>${esc(it.sub)}</small>` : '');
+    b.innerHTML = esc(it.label) + (it.badge ? badge(it.badge) : '') + (it.count ? dot(it.count) : '') + (it.sub ? `<small>${esc(it.sub)}</small>` : '');
     b.onclick = () => onPick(it);
     b.onkeydown = e => { if (e.key === 'Enter') onPick(it); };
     if (onMenu) b.oncontextmenu = e => { e.preventDefault(); onMenu(it, e); };
@@ -196,12 +206,22 @@ async function openChat(table, col, val, opts = {}) {
     }
   };
   const find = id => box.querySelector(`[data-id="${id}"]`);
-  const setEdited = (d, m) => {
-    $('.txt', d).textContent = m.content;
+  const setEdited = async (d, m) => {
+    $('.txt', d).innerHTML = await mhtml(m);
     if (m.edited_at && !$('.eu', d)) {
       $('.head small', d).insertAdjacentHTML('beforeend', ' <i>edited</i>');
       $('.body', d).insertAdjacentHTML('beforeend', '<i class="eu">edited</i>');
     }
+  };
+  // Message text with @mentions highlighted (only mentions the database confirmed)
+  const mhtml = async m => {
+    const names = new Set((await Promise.all(arr(m.mentions).map(pf))).map(p => p.username.toLowerCase()));
+    if (m.mention_all) names.add('all');
+    return esc(m.content).replace(/@([^\s@]+)/g, (full, w) => {
+      const tail = (w.match(/[.,!?;:)]+$/) || [''])[0], bare = tail ? w.slice(0, -tail.length) : w;
+      const hit = names.has(w.toLowerCase()) ? w : names.has(bare.toLowerCase()) ? bare : null;
+      return hit === null ? full : `<span class="mention">@${hit}</span>` + (hit === w ? '' : tail);
+    });
   };
   const att = m => m.image_url && /^https:\/\//.test(m.image_url)
     ? `<a href="${esc(m.image_url)}" target="_blank" rel="noopener"><img class="att" src="${esc(m.image_url)}" alt="image" loading="lazy"></a>` : '';
@@ -255,16 +275,18 @@ async function openChat(table, col, val, opts = {}) {
   };
   const add = async m => {
     const p = await pf(m.user_id);
+    const html = await mhtml(m);
     const d = document.createElement('div');
     d.className = 'msg'; d.dataset.id = m.id; d.dataset.user = m.user_id; d.dataset.t = new Date(m.created_at).getTime();
-    d.innerHTML = `<div class="pfp sm"></div><div class="body"><div class="head"><b>${esc(p.username)}</b>${badge(p.badge)}<small>${new Date(m.created_at).toLocaleString()}${m.edited_at ? ' <i>edited</i>' : ''}</small></div><div class="txt">${esc(m.content)}</div>${att(m)}${m.edited_at ? '<i class="eu">edited</i>' : ''}</div>`;
+    d.innerHTML = `<div class="pfp sm"></div><div class="body"><div class="head"><b>${esc(p.username)}</b>${badge(p.badge)}<small>${new Date(m.created_at).toLocaleString()}${m.edited_at ? ' <i>edited</i>' : ''}</small></div><div class="txt">${html}</div>${att(m)}${m.edited_at ? '<i class="eu">edited</i>' : ''}</div>`;
     paintAvatar($('.pfp', d), p);
+    d.classList.toggle('mentioned', m.user_id !== me.id && (arr(m.mentions).includes(me.id) || !!m.mention_all));
     box.append(d); layout(); box.scrollTop = box.scrollHeight;
     $('img', d)?.addEventListener('load', () => box.scrollTop = box.scrollHeight);
   };
 
   const edit = d => {
-    const txt = $('.txt', d), old = txt.textContent;
+    const txt = $('.txt', d), old = txt.textContent, oldHTML = txt.innerHTML;
     const i = document.createElement('input');
     i.className = 'editbox'; i.value = old; i.maxLength = 2000;
     txt.replaceChildren(i); i.focus();
@@ -272,9 +294,9 @@ async function openChat(table, col, val, opts = {}) {
     const finish = async save => {
       if (done) return; done = true;
       const v = i.value.trim();
-      if (!save || !v || v === old) return void (txt.textContent = old);
+      if (!save || !v || v === old) return void (txt.innerHTML = oldHTML);
       const { data, error } = await sb.from(table).update(isMod ? { content: v } : { content: v, edited_at: new Date().toISOString() }).eq('id', d.dataset.id).select().single();
-      if (error) { alert(error.message); txt.textContent = old; return; }
+      if (error) { alert(error.message); txt.innerHTML = oldHTML; return; }
       setEdited(d, data);
     };
     i.onkeydown = e => { if (e.key === 'Enter') finish(true); if (e.key === 'Escape') finish(false); };
@@ -305,11 +327,12 @@ async function openChat(table, col, val, opts = {}) {
   const PERMS = [
     ['can_talk', 'Talk everywhere', 'Can type in read-only channels.'],
     ['can_kick', 'Kick members', 'Can remove people from this room.'],
-    ['can_channels', 'Create channels', 'Can add new channels.']
+    ['can_channels', 'Create channels', 'Can add new channels.'],
+    ['can_mention_all', 'Use @all', 'Can mention everyone in the room.']
   ];
   const permDialog = async uid => {
     const [prof, { data: p }] = await Promise.all([pf(uid),
-      sb.from('room_members').select('can_talk,can_kick,can_channels').eq('room_id', rm.id).eq('user_id', uid).maybeSingle()]);
+      sb.from('room_members').select('can_talk,can_kick,can_channels,can_mention_all').eq('room_id', rm.id).eq('user_id', uid).maybeSingle()]);
     if (!p) return alert('That person is no longer in this room.');
     const m = document.createElement('div');
     m.className = 'modal';
@@ -365,6 +388,69 @@ async function openChat(table, col, val, opts = {}) {
     .on('postgres_changes', { event: 'UPDATE', schema: 'public', table, filter }, p => { const d = find(p.new.id); if (d) setEdited(d, p.new); })
     .on('postgres_changes', { event: 'DELETE', schema: 'public', table }, p => { find(p.old.id)?.remove(); layout(); })
     .subscribe();
+  // Type @ in a room: list members A–Z, narrow as you type, Enter/Tab/click to pick
+  let members = null;
+  const loadMembers = async () => {
+    if (members) return members;
+    const { data: rows } = await sb.from('room_members').select('user_id').eq('room_id', rm.id);
+    const ids = (rows || []).map(r => r.user_id);
+    let ps = ids.length ? (await sb.from('profile_badges').select('id,username').in('id', ids)).data : [];
+    if (!ps && ids.length) ps = (await sb.from('profiles').select('id,username').in('id', ids)).data;
+    return members = (ps || []).sort((a, z) => a.username.localeCompare(z.username, undefined, { sensitivity: 'base' }));
+  };
+  const mentionBox = (input, form) => {
+    const pop = document.createElement('div');
+    pop.className = 'mpop'; pop.hidden = true;
+    form.append(pop);
+    const canAll = rm.isOwner || rm.canAll;
+    let shown = [], sel = 0;
+    const close = () => { pop.hidden = true; shown = []; };
+    const draw = () => {
+      pop.innerHTML = '';
+      shown.forEach((o, i) => {
+        const r = document.createElement('div');
+        r.className = 'mopt' + (i === sel ? ' on' : '');
+        r.textContent = '@' + o.username + (o.id === 'all' ? ' – notify everyone' : '');
+        r.onmousedown = e => { e.preventDefault(); choose(o); };
+        pop.append(r);
+      });
+      pop.hidden = !shown.length;
+    };
+    const token = () => {
+      const m = /(^|\s)@([^\s@]*)$/.exec(input.value.slice(0, input.selectionStart));
+      return m && { q: m[2].toLowerCase(), start: input.selectionStart - m[2].length - 1 };
+    };
+    const choose = o => {
+      const t = token();
+      if (!t) return;
+      const before = input.value.slice(0, t.start) + '@' + o.username + ' ';
+      input.value = before + input.value.slice(input.selectionStart);
+      input.setSelectionRange(before.length, before.length);
+      close(); input.focus();
+    };
+    const update = async () => {
+      const t = token();
+      if (!t) return close();
+      const pool = [...(canAll ? [{ id: 'all', username: 'all' }] : []), ...await loadMembers()];
+      const low = u => u.username.toLowerCase();
+      shown = [...pool.filter(u => low(u).startsWith(t.q)), ...pool.filter(u => !low(u).startsWith(t.q) && low(u).includes(t.q))];
+      sel = 0; draw();
+    };
+    input.addEventListener('input', update);
+    input.addEventListener('click', update);
+    input.addEventListener('blur', close);
+    input.addEventListener('keyup', e => { if (['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(e.key)) update(); });
+    input.addEventListener('keydown', e => {
+      if (pop.hidden) return;
+      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+        e.preventDefault();
+        sel = (sel + (e.key === 'ArrowDown' ? 1 : -1) + shown.length) % shown.length;
+        draw(); pop.querySelector('.on')?.scrollIntoView({ block: 'nearest' });
+      } else if (e.key === 'Enter' || e.key === 'Tab') { e.preventDefault(); choose(shown[sel]); }
+      else if (e.key === 'Escape') close();
+    });
+  };
+
   if (!opts.locked) {
   $('.plus', el).onclick = e => {
     e.stopPropagation();
@@ -378,5 +464,6 @@ async function openChat(table, col, val, opts = {}) {
     i.value = '';
     send(t);
   };
+  if (rm) mentionBox($('input', el), $('form', el));
   }
 }

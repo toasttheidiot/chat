@@ -2,7 +2,7 @@ const sb = supabase.createClient(new URL(SUPABASE_URL.trim()).origin, SUPABASE_A
 const $ = (s, r = document) => r.querySelector(s);
 const esc = s => String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const APP_KIND = 'beta'; // main app.js lives in the root folder, beta app.js in /beta
-console.info('chat app.js:', APP_KIND, 'v13');
+console.info('chat app.js:', APP_KIND, 'v14');
 addEventListener('DOMContentLoaded', () => {
   if ((APP_KIND === 'beta') !== location.pathname.includes('/beta/')) {
     const d = document.createElement('div');
@@ -95,14 +95,14 @@ function paintBanner(el, p) {
   el.style.backgroundSize = 'cover'; el.style.backgroundPosition = 'center';
 }
 document.head.insertAdjacentHTML('beforeend', `<style>
-.pcard{width:min(440px,94vw);background:var(--panel);border:1px solid var(--line);border-radius:14px;overflow:hidden;box-shadow:0 10px 40px #0009}
+.pcard{width:min(600px,94vw);background:var(--panel);border:1px solid var(--line);border-radius:14px;overflow:hidden;box-shadow:0 10px 40px #0009}
 .pbanner{height:120px;position:relative}
 .pclose{position:absolute;top:8px;right:8px;width:30px;height:30px;padding:0;border-radius:50%;background:#0008;color:#fff;border:0;font-size:18px;line-height:1}
-.pbody{display:flex;gap:16px;padding:0 20px 20px}
-.pfp.huge{width:96px;height:96px;font-size:36px;margin-top:-48px;border:4px solid var(--panel);flex:none}
-.pinfo{min-width:0;padding-top:12px}
-.pname{margin:0;font-size:20px;overflow-wrap:anywhere}
-.pdesc{margin:6px 0 0;color:var(--mute);overflow-wrap:anywhere;white-space:pre-wrap}
+.pbody{display:flex;gap:20px;padding:0 28px 32px;min-height:170px}
+.pfp.huge{width:120px;height:120px;font-size:44px;margin-top:-60px;border:4px solid var(--panel);flex:none;position:relative;z-index:1}
+.pinfo{min-width:0;padding-top:16px}
+.pname{margin:0;font-size:24px;overflow-wrap:anywhere}
+.pdesc{margin:10px 0 0;font-size:16px;line-height:1.5;color:var(--mute);overflow-wrap:anywhere;white-space:pre-wrap}
 .pact{margin-top:12px}
 .pbannerprev{height:90px;border-radius:12px;border:1px solid var(--line);margin-bottom:12px}
 .msg .head b,.msg .pfp{cursor:pointer}.msg .head b:hover,.msg.uh .head b{text-decoration:underline}

@@ -1,0 +1,87 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><script>try{document.documentElement.dataset.theme=localStorage.getItem("theme")||"dark"}catch(e){}</script><meta name="viewport" content="width=device-width,initial-scale=1"><title>Changes</title><link rel="stylesheet" href="style.css?v=15">
+<style>
+.cl-wrap{flex:1;overflow:auto;padding:24px 28px;max-width:780px}
+.cl-wrap h2{margin:0 0 2px}
+.cl-head{display:flex;gap:12px;align-items:flex-start;justify-content:space-between}
+.cl-actions{display:flex;gap:8px;flex-wrap:wrap}
+.cl{white-space:pre-wrap;overflow-wrap:anywhere;line-height:1.6;margin-top:6px}
+form.cl-wrap textarea{min-height:280px}
+</style></head><body>
+<div id="app"><aside id="side"></aside><section id="right"><header id="top"></header><div id="row"><nav id="chan" hidden></nav><main id="content"></main></div></section></div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script><script src="config.js"></script><script src="app.js?v=15"></script>
+<script>
+let updates = [], current = null;
+const $c = $('#content');
+const blank = '<div class="empty"><p>Select an update to see what changed.</p></div>';
+const fmt = t => new Date(t).toLocaleString();
+$('#top').textContent = 'Changes';
+$c.innerHTML = blank;
+
+function renderList() {
+  list(updates.map(u => ({ id: u.id, label: u.title, sub: new Date(u.created_at).toLocaleDateString() })),
+    current, pick, 'No updates yet.');
+  $('#list').querySelectorAll('.item').forEach(x => x.draggable = false);
+}
+
+async function loadUpdates() {
+  const { data, error } = await sb.from('updates').select('*').order('created_at', { ascending: false });
+  if (error) { $('#list').innerHTML = '<div class="hint">Could not load updates: ' + esc(error.message) + '</div>'; return; }
+  updates = data || [];
+  renderList();
+}
+
+function pick(it) {
+  current = it.id;
+  renderList();
+  show(updates.find(u => u.id === it.id));
+}
+
+function show(u) {
+  $('#top').textContent = 'Changes';
+  const edited = new Date(u.updated_at) - new Date(u.created_at) > 60000;
+  $c.innerHTML = `<div class="cl-wrap"><div class="cl-head"><div><h2></h2><p class="note"></p></div>
+    <div class="cl-actions">${isMod ? '<button id="ed">Edit</button>' : ''}</div></div><div class="cl"></div></div>`;
+  $('h2', $c).textContent = u.title;
+  $('.note', $c).textContent = fmt(u.created_at) + (edited ? ' · edited ' + fmt(u.updated_at) : '');
+  $('.cl', $c).textContent = u.changelog || 'No changelog written yet.';
+  if (isMod) $('#ed').onclick = () => editor(u);
+}
+
+function editor(u) {
+  $c.innerHTML = `<form class="cl-wrap"><h2></h2>
+    <label>Update name<input name="t" maxlength="100" required placeholder="e.g. v0.3 – Voice rooms"></label>
+    <label>Changelog<textarea name="c" maxlength="20000" placeholder="Write what changed. Starting lines with - looks like a list."></textarea></label>
+    <div class="cl-actions"><button>Save</button><button type="button" class="x">Cancel</button>${u ? '<button type="button" class="danger del">Delete update</button>' : ''}</div>
+    <p class="note" id="msg"></p></form>`;
+  const f = $('form', $c);
+  $('h2', f).textContent = u ? 'Edit update' : 'New update';
+  f.t.value = u?.title || ''; f.c.value = u?.changelog || '';
+  f.t.focus();
+  $('.x', f).onclick = () => u ? show(u) : ($c.innerHTML = blank);
+  f.onsubmit = async e => {
+    e.preventDefault();
+    const row = { title: f.t.value.trim(), changelog: f.c.value };
+    const q = u
+      ? sb.from('updates').update({ ...row, updated_at: new Date().toISOString() }).eq('id', u.id)
+      : sb.from('updates').insert({ ...row, created_by: me.id });
+    const { data, error } = await q.select().single();
+    if (error) return $('#msg').textContent = error.message;
+    current = data.id;
+    await loadUpdates();
+    show(data);
+  };
+  if (u) $('.del', f).onclick = async () => {
+    if (!confirm('Delete this update and its changelog?')) return;
+    const { error } = await sb.from('updates').delete().eq('id', u.id);
+    if (error) return alert(error.message);
+    current = null;
+    await loadUpdates();
+    $c.innerHTML = blank;
+  };
+}
+
+boot('changes').then(() => {
+  if (isMod) addButton('+ New update', () => editor(null));
+  loadUpdates().then(() => { if (updates[0]) pick({ id: updates[0].id }); });
+});
+</script></body></html>

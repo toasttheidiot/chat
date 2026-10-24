@@ -55,7 +55,7 @@ function channelDialog(canLock) {
 async function pickRoom(it, openId) {
   room = it; channel = null;
   await loadRooms();
-  room = rooms.find(r => r.id === it.id) || it; // fresh permissions
+  room = rooms.find(r => r.id === it.id) || it;
   $('#top').innerHTML = esc(room.label) + ' <small>ID: ' + esc(room.id) + '</small>';
   $('#content').innerHTML = '';
   const { data } = await sb.from('channels').select('*').eq('room_id', room.id).order('created_at');
@@ -110,7 +110,6 @@ boot('rooms').then(() => {
     pickRoom(rooms.find(r => r.id === id.trim()) || { id: id.trim(), label: data });
   });
   loadRooms();
-  // Live: you were kicked / left elsewhere, or your permissions changed
   sb.channel('my-rooms')
     .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'room_members' }, p => {
       if (p.old.user_id !== me.id) return;

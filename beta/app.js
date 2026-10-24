@@ -1,7 +1,7 @@
 const sb = supabase.createClient(new URL(SUPABASE_URL.trim()).origin, SUPABASE_ANON_KEY.trim());
 const $ = (s, r = document) => r.querySelector(s);
 const esc = s => String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-const APP_KIND = 'beta'; // main app.js lives in the root folder, beta app.js in /beta
+const APP_KIND = 'beta';
 console.info('chat app.js:', APP_KIND, 'v14');
 addEventListener('DOMContentLoaded', () => {
   if ((APP_KIND === 'beta') !== location.pathname.includes('/beta/')) {
@@ -16,7 +16,6 @@ addEventListener('DOMContentLoaded', () => {
 
 let me, profile, sub, isMod = false, isBeta = false;
 
-// Badges: small colored dots with a symbol drawn as SVG (not emoji)
 const BADGES = {
   mod: { name: 'Moderator', color: '#3b82f6',
     icon: '<g transform="translate(-.6 .6)"><line x1="4.9" y1="11.6" x2="9.5" y2="7" stroke="#fff" stroke-width="1.6" stroke-linecap="round"/><rect x="7.7" y="5" width="5" height="2.6" rx=".6" fill="#fff" transform="rotate(45 10.2 6.3)"/></g>' },
@@ -36,13 +35,11 @@ function paintAvatar(el, p) {
   else el.textContent = p.username[0].toUpperCase();
 }
 
-// Sign out for real: clear the session even if the server can’t be reached
 async function signOutNow() {
   try { await sb.auth.signOut({ scope: 'local' }); } catch {}
   try { Object.keys(localStorage).filter(k => k.startsWith('sb-')).forEach(k => localStorage.removeItem(k)); } catch {}
   location.href = 'index.html';
 }
-// Signed out in another tab? Show the sign-in screen here too
 addEventListener('storage', e => {
   if (e.key && e.key.startsWith('sb-') && e.key.endsWith('-auth-token') && !e.newValue) location.reload();
 });
@@ -79,7 +76,6 @@ function login() {
 const dot = n => `<span class="dot">${n > 99 ? '99+' : n}</span>`;
 const arr = x => Array.isArray(x) ? x : typeof x === 'string' ? x.replace(/[{}]/g, '').split(',').filter(Boolean) : [];
 
-// ---- Banners and profile popups ----
 function hslHex(h, s, l) {
   s /= 100; l /= 100;
   const k = n => (n + h / 30) % 12, a = s * Math.min(l, 1 - l);
@@ -87,7 +83,7 @@ function hslHex(h, s, l) {
   const x = v => Math.round(255 * v).toString(16).padStart(2, '0');
   return '#' + x(f(0)) + x(f(8)) + x(f(4));
 }
-// Everyone gets their own steady "random" color until they pick one
+
 const autoColor = id => { let h = 0; for (const c of String(id)) h = (h * 31 + c.charCodeAt(0)) >>> 0; return hslHex(h % 360, 55, 42); };
 function paintBanner(el, p) {
   el.style.backgroundColor = p.banner_color || autoColor(p.id);
@@ -122,7 +118,7 @@ async function openProfile(uid) {
   paintAvatar($('.pfp', m), p);
   $('.pname', m).innerHTML = esc(p.username) + badge(p.badge);
   $('.pdesc', m).textContent = p.description || 'No description yet.';
-  if (uid === me.id) { // your own profile: shortcut to change it
+  if (uid === me.id) {
     const b = document.createElement('button');
     b.className = 'pact'; b.textContent = 'Edit profile';
     b.onclick = () => window.open('settings.html', '_blank', 'noopener');
@@ -143,7 +139,6 @@ function showNoBeta() {
   return new Promise(() => {});
 }
 
-// Signs in, loads your profile, blocks banned users. Used by every page.
 async function auth(allowMods = false) {
   const { data: { session } } = await sb.auth.getSession();
   if (!session) await login();
@@ -155,12 +150,12 @@ async function auth(allowMods = false) {
   isMod = !!(await sb.rpc('is_mod')).data;
   isBeta = !!(await sb.rpc('is_beta')).data;
   if (!isBeta && !(allowMods && isMod)) await showNoBeta();
-  profile.badge = (await sb.from('profile_badges').select('badge').eq('id', me.id).maybeSingle()).data?.badge || null; // beta pages are for beta testers only
+  profile.badge = (await sb.from('profile_badges').select('badge').eq('id', me.id).maybeSingle()).data?.badge || null;
 }
 
-// page: 'home' | 'dms' | 'rooms'
+
 async function boot(page) {
-  await auth(page === 'changes'); // mods may open the changelog page without being beta testers
+  await auth(page === 'changes');
   document.head.insertAdjacentHTML('beforeend', `<style>.tabs{gap:8px;padding:14px 8px}.tabs a{padding:7px 14px}.badge{width:16px;height:16px;vertical-align:-3px;margin-left:5px;flex:none}
 .dot{display:inline-block;min-width:18px;height:18px;line-height:18px;padding:0 5px;border-radius:9px;background:#e53935;color:#fff;font-size:11px;font-weight:700;text-align:center;margin-left:6px;vertical-align:1px}
 .send{position:relative}
@@ -193,14 +188,13 @@ async function applyOrder(items) {
   return items.map((it, i) => ({ it, k: pos[it.id] ?? 1e9 + i })).sort((x, y) => x.k - y.k).map(x => x.it);
 }
 
-// Sidebar list: click to open, drag to reorder, optional right-click menu
 function list(items, selected, onPick, emptyText, onMenu) {
   const el = $('#list');
   el.innerHTML = items.length ? '' : `<div class="hint">${emptyText}</div>`;
   const ids = () => [...el.querySelectorAll('.item')].map(x => x.dataset.id);
   let dragged = null, before = '';
   for (const it of items) {
-    const b = document.createElement('div'); // div, not button: Firefox can’t drag buttons
+    const b = document.createElement('div');
     b.className = 'item' + (it.id === selected ? ' on' : '');
     b.setAttribute('role', 'button'); b.tabIndex = 0; b.draggable = true; b.dataset.id = it.id;
     b.innerHTML = esc(it.label) + (it.badge ? badge(it.badge) : '') + (it.count ? dot(it.count) : '') + (it.sub ? `<small>${esc(it.sub)}</small>` : '');
@@ -253,7 +247,6 @@ async function openChat(table, col, val, opts = {}) {
   const box = $('.msgs', el), profs = {};
   const pf = id => profs[id] ??= sb.from('profile_badges').select('username,avatar_url,badge').eq('id', id).maybeSingle()
     .then(async r => r.data || (await sb.from('profiles').select('username,avatar_url').eq('id', id).maybeSingle()).data || { username: 'unknown' });
-  // A message hides its name/picture/time when the same person wrote the one before it less than an hour earlier
   const layout = () => {
     let prev = null;
     for (const d of box.children) {
@@ -269,7 +262,6 @@ async function openChat(table, col, val, opts = {}) {
       $('.body', d).insertAdjacentHTML('beforeend', '<i class="eu">edited</i>');
     }
   };
-  // Message text with @mentions highlighted (only mentions the database confirmed)
   const mhtml = async m => {
     const names = new Set((await Promise.all(arr(m.mentions).map(pf))).map(p => p.username.toLowerCase()));
     if (m.mention_all) names.add('all');
@@ -337,7 +329,6 @@ async function openChat(table, col, val, opts = {}) {
     d.innerHTML = `<div class="pfp sm"></div><div class="body"><div class="head"><b>${esc(p.username)}</b>${badge(p.badge)}<small>${new Date(m.created_at).toLocaleString()}${m.edited_at ? ' <i>edited</i>' : ''}</small></div><div class="txt">${html}</div>${att(m)}${m.edited_at ? '<i class="eu">edited</i>' : ''}</div>`;
     paintAvatar($('.pfp', d), p);
     d.classList.toggle('mentioned', m.user_id !== me.id && (arr(m.mentions).includes(me.id) || !!m.mention_all));
-    // Hover the picture or name: the name underlines. Click: open their profile.
     const openMe = () => openProfile(m.user_id), pic = $('.pfp', d);
     pic.onclick = openMe; $('.head b', d).onclick = openMe;
     pic.onmouseenter = () => d.classList.add('uh'); pic.onmouseleave = () => d.classList.remove('uh');
@@ -427,7 +418,7 @@ async function openChat(table, col, val, opts = {}) {
     if (!d) return;
     const uid = d.dataset.user, own = uid === me.id;
     const roomActions = rm && !own && uid !== rm.owner && (rm.isOwner || rm.canKick);
-    if (!own && !isMod && !roomActions) return; // others only get the normal browser menu
+    if (!own && !isMod && !roomActions) return;
     e.preventDefault();
     const x = e.clientX, y = e.clientY, items = [];
     if (own || isMod) items.push(['Edit', () => edit(d)], ['Delete', () => del(d), true]);
@@ -448,7 +439,6 @@ async function openChat(table, col, val, opts = {}) {
     .on('postgres_changes', { event: 'UPDATE', schema: 'public', table, filter }, p => { const d = find(p.new.id); if (d) setEdited(d, p.new); })
     .on('postgres_changes', { event: 'DELETE', schema: 'public', table }, p => { find(p.old.id)?.remove(); layout(); })
     .subscribe();
-  // Type @ in a room: list members A–Z, narrow as you type, Enter/Tab/click to pick
   let members = null;
   const loadMembers = async () => {
     if (members) return members;

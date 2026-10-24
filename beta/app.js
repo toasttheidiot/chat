@@ -23,6 +23,17 @@ function paintAvatar(el, p) {
   else el.textContent = p.username[0].toUpperCase();
 }
 
+// Sign out for real: clear the session even if the server can’t be reached
+async function signOutNow() {
+  try { await sb.auth.signOut({ scope: 'local' }); } catch {}
+  try { Object.keys(localStorage).filter(k => k.startsWith('sb-')).forEach(k => localStorage.removeItem(k)); } catch {}
+  location.href = 'index.html';
+}
+// Signed out in another tab? Show the sign-in screen here too
+addEventListener('storage', e => {
+  if (e.key && e.key.startsWith('sb-') && e.key.endsWith('-auth-token') && !e.newValue) location.reload();
+});
+
 function showBan() {
   const g = document.createElement('div');
   g.className = 'gate'; g.style.zIndex = 100;
@@ -36,7 +47,7 @@ function login() {
   g.className = 'gate';
   g.innerHTML = `<form><h2>Sign in</h2><input name="u" placeholder="Username" autocomplete="username" required>
     <input name="p" type="password" placeholder="Password" autocomplete="current-password" required>
-    <button>Sign in</button><p></p></form>`;
+    <button>Sign in</button><p></p><a href="../signup.html" style="text-align:center;text-decoration:underline">Create an account</a></form>`;
   document.body.append(g);
   const f = $('form', g), msg = $('p', g);
   f.onsubmit = async e => {
@@ -329,7 +340,98 @@ async function openChat(table, col, val, opts = {}) {
     }
     if (isMod && !own) items.push(['Ban', () => ban(d), true], ['Delete account', () => nuke(d), true]);
     ctxMenu(x, y, items);
-  };
+  };Skip to content
+
+We are investigating a technical issue
+·
+Follow the status page for updates
+SupabaseBack to organization home
+chat
+Free
+toasttheidiot's Project
+main
+Production
+Connect
+Feedback
+
+Search...
+Ctrl K
+Help
+Advisor Center
+SQL Editor
+AI Assistant
+toasttheidiot
+
+    Project Overview
+    Table Editor
+    SQL Editor
+
+    Database
+    Authentication
+    Storage
+    Edge Functions
+    Compute
+    New
+    Realtime
+
+    Advisors
+    Observability
+    Logs
+    Integrations
+
+    Project Settings
+
+SQL Editor
+Search queries
+Shared
+Favorites
+PRIVATE (12)
+
+Logs
+Reference
+View running queries
+Collapse sidebar
+Untitled query
+2
+3
+mod
+5
+upd
+beta
+Saved
+Database
+Save
+Ctrl S
+Run
+Ctrl ↵
+1
+2
+3
+4
+5
+6
+7
+8
+9
+10
+11
+12
+13
+14
+15
+16
+17
+18
+19
+20
+21
+Results
+Chart
+
+Click Run to execute your query
+
+beta | SQL Editor | toasttheidiot's Project | chat | Supabase
+
 
   const { data } = await sb.from(table).select('*').eq(col, val).order('created_at', { ascending: false }).limit(100);
   for (const m of (data || []).reverse()) await add(m);

@@ -45,7 +45,6 @@ boot('dms').then(() => {
     pick(dmItems.find(x => x.id === data) || { id: data, label: u.trim() });
   });
   loadDms();
-  // A message arrives in a DM that isn’t open: refresh the unread counts
   let t;
   sb.channel('dm-unread')
     .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'dm_messages' }, async p => {

@@ -12,6 +12,17 @@ function paintAvatar(el, p) {
   else el.textContent = p.username[0].toUpperCase();
 }
 
+// Sign out for real: clear the session even if the server can’t be reached
+async function signOutNow() {
+  try { await sb.auth.signOut({ scope: 'local' }); } catch {}
+  try { Object.keys(localStorage).filter(k => k.startsWith('sb-')).forEach(k => localStorage.removeItem(k)); } catch {}
+  location.href = 'index.html';
+}
+// Signed out in another tab? Show the sign-in screen here too
+addEventListener('storage', e => {
+  if (e.key && e.key.startsWith('sb-') && e.key.endsWith('-auth-token') && !e.newValue) location.reload();
+});
+
 function showBan() {
   const g = document.createElement('div');
   g.className = 'gate'; g.style.zIndex = 100;
@@ -25,7 +36,7 @@ function login() {
   g.className = 'gate';
   g.innerHTML = `<form><h2>Sign in</h2><input name="u" placeholder="Username" autocomplete="username" required>
     <input name="p" type="password" placeholder="Password" autocomplete="current-password" required>
-    <button>Sign in</button><p></p></form>`;
+    <button>Sign in</button><p></p><a href="signup.html" style="text-align:center;text-decoration:underline">Create an account</a></form>`;
   document.body.append(g);
   const f = $('form', g), msg = $('p', g);
   f.onsubmit = async e => {

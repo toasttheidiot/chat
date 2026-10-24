@@ -1,7 +1,7 @@
 <!doctype html><html lang="en"><head><meta charset="utf-8"><script>try{document.documentElement.dataset.theme=localStorage.getItem('theme')||'dark'}catch(e){}</script>
-<meta name="viewport" content="width=device-width,initial-scale=1"><title>Settings</title><link rel="stylesheet" href="style.css"></head><body>
+<meta name="viewport" content="width=device-width,initial-scale=1"><title>Settings (beta)</title><link rel="stylesheet" href="../style.css"><style>.badge{width:16px;height:16px;flex:none}</style></head><body>
 <div class="set"><nav id="snav"><h3>Settings</h3></nav><main id="spane"></main></div>
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script><script src="config.js"></script><script src="app.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script><script src="../config.js"></script><script src="app.js"></script>
 <script>
 const pane = $('#spane'), nav = $('#snav');
 const tabs = { 'User info': userInfo, 'Account': account, 'Display': display };
@@ -9,7 +9,6 @@ const say = t => { const m = $('#msg'); if (m) m.textContent = t; };
 
 auth().then(() => {
   if (isMod) tabs['Moderator'] = moderator;
-  if (isBeta) tabs['Beta test'] = betaTab;
   for (const name in tabs) {
     const b = document.createElement('button');
     b.className = 'item'; b.textContent = name;
@@ -31,10 +30,28 @@ function userInfo() {
       <p class="note">PNG, JPG, GIF or WebP, up to 2 MB.</p></div></div>
     <label>Username<input id="un" maxlength="30"></label>
     <label>Description<textarea id="ds" rows="3" maxlength="150"></textarea></label>
+    <div class="card" id="bcard" hidden><h3>Badge</h3><p class="note">Choose which badge shows next to your name.</p><div id="bopts"></div></div>
     <button id="save">Save changes</button><p class="note" id="msg"></p>`);
   paintAvatar($('#av'), profile);
   $('#un').value = profile.username;
   $('#ds').value = profile.description || '';
+  const avail = [isMod && 'mod', isBeta && 'beta'].filter(Boolean);
+  if (avail.length > 1) {
+    $('#bcard').hidden = false;
+    for (const k of avail) {
+      const l = document.createElement('label');
+      l.className = 'chk';
+      l.innerHTML = `<input type="radio" name="bd" value="${k}">${badge(k)}<span>${BADGES[k].name}</span>`;
+      const r = $('input', l);
+      r.checked = profile.badge === k;
+      r.onchange = async () => {
+        const { error } = await sb.rpc('set_badge', { b: k });
+        if (error) return say(error.message);
+        profile.badge = k; say('Badge updated.');
+      };
+      $('#bopts').append(l);
+    }
+  }
   $('#pick').onclick = () => $('#file').click();
   $('#file').onchange = async e => {
     const f = e.target.files[0];
@@ -105,7 +122,7 @@ async function moderator() {
     <div class="card"><h3>Your powers</h3><p class="note">Right-click any message to edit or delete it. On other people’s messages you also get Ban and Delete account. Your edits don’t show “edited”.</p></div>
     <div class="card"><h3>Beta changelog</h3><p class="note">Create beta updates and write or edit their changelogs.</p><button id="cl">Open beta changelog</button></div>
     <div class="card"><h3>Banned users</h3><div id="bl" class="note">Loading…</div></div>`);
-  $('#cl').onclick = () => window.open('beta/changes.html', '_blank', 'noopener');
+  $('#cl').onclick = () => window.open('changes.html', '_blank', 'noopener');
   const load = async () => {
     const { data = [] } = await sb.from('profiles').select('id,username').eq('banned', true);
     const bl = $('#bl'); bl.innerHTML = data.length ? '' : 'Nobody is banned.';

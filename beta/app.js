@@ -1,6 +1,19 @@
 const sb = supabase.createClient(new URL(SUPABASE_URL.trim()).origin, SUPABASE_ANON_KEY.trim());
 const $ = (s, r = document) => r.querySelector(s);
 const esc = s => String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const APP_KIND = 'beta'; // main app.js lives in the root folder, beta app.js in /beta
+console.info('chat app.js:', APP_KIND, 'v11');
+addEventListener('DOMContentLoaded', () => {
+  if ((APP_KIND === 'beta') !== location.pathname.includes('/beta/')) {
+    const d = document.createElement('div');
+    d.style.cssText = 'position:fixed;z-index:200;left:0;right:0;top:0;padding:10px 14px;background:#b00020;color:#fff;font:14px system-ui,sans-serif';
+    d.textContent = APP_KIND === 'beta'
+      ? 'Wrong file: the beta app.js was uploaded outside the beta folder.'
+      : 'Wrong file: the main app.js was uploaded inside the beta folder.';
+    document.body.append(d);
+  }
+});
+
 let me, profile, sub, isMod = false, isBeta = false;
 
 // Badges: small colored dots with a symbol drawn as SVG (not emoji)
@@ -172,7 +185,8 @@ async function openChat(table, col, val, opts = {}) {
   const el = $('#content');
   el.innerHTML = `<div class="msgs"></div>` + (opts.locked ? '<div class="send locked">Only the room owner and people they allow can type in this channel.</div>' : `<form class="send"><input placeholder="Type a message" autocomplete="off" maxlength="2000"><button type="button" class="plus" title="Add an image or GIF">+</button><button>Send</button></form>`);
   const box = $('.msgs', el), profs = {};
-  const pf = id => profs[id] ??= sb.from('profile_badges').select('username,avatar_url,badge').eq('id', id).single().then(r => r.data || { username: 'unknown' });
+  const pf = id => profs[id] ??= sb.from('profile_badges').select('username,avatar_url,badge').eq('id', id).maybeSingle()
+    .then(async r => r.data || (await sb.from('profiles').select('username,avatar_url').eq('id', id).maybeSingle()).data || { username: 'unknown' });
   // A message hides its name/picture/time when the same person wrote the one before it less than an hour earlier
   const layout = () => {
     let prev = null;
@@ -340,98 +354,7 @@ async function openChat(table, col, val, opts = {}) {
     }
     if (isMod && !own) items.push(['Ban', () => ban(d), true], ['Delete account', () => nuke(d), true]);
     ctxMenu(x, y, items);
-  };Skip to content
-
-We are investigating a technical issue
-·
-Follow the status page for updates
-SupabaseBack to organization home
-chat
-Free
-toasttheidiot's Project
-main
-Production
-Connect
-Feedback
-
-Search...
-Ctrl K
-Help
-Advisor Center
-SQL Editor
-AI Assistant
-toasttheidiot
-
-    Project Overview
-    Table Editor
-    SQL Editor
-
-    Database
-    Authentication
-    Storage
-    Edge Functions
-    Compute
-    New
-    Realtime
-
-    Advisors
-    Observability
-    Logs
-    Integrations
-
-    Project Settings
-
-SQL Editor
-Search queries
-Shared
-Favorites
-PRIVATE (12)
-
-Logs
-Reference
-View running queries
-Collapse sidebar
-Untitled query
-2
-3
-mod
-5
-upd
-beta
-Saved
-Database
-Save
-Ctrl S
-Run
-Ctrl ↵
-1
-2
-3
-4
-5
-6
-7
-8
-9
-10
-11
-12
-13
-14
-15
-16
-17
-18
-19
-20
-21
-Results
-Chart
-
-Click Run to execute your query
-
-beta | SQL Editor | toasttheidiot's Project | chat | Supabase
-
+  };
 
   const { data } = await sb.from(table).select('*').eq(col, val).order('created_at', { ascending: false }).limit(100);
   for (const m of (data || []).reverse()) await add(m);

@@ -1,6 +1,6 @@
-<!doctype html><html lang="en"><head><title>Direct messages (beta)</title><meta charset="utf-8"><script>try{document.documentElement.dataset.theme=localStorage.getItem("theme")||"dark"}catch(e){}</script><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="../style.css"></head><body>
+<!doctype html><html lang="en"><head><title>Direct messages (beta)</title><meta charset="utf-8"><script>try{document.documentElement.dataset.theme=localStorage.getItem("theme")||"dark"}catch(e){}</script><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="../style.css?v=11"></head><body>
 <div id="app"><aside id="side"></aside><section id="right"><header id="top"></header><div id="row"><nav id="chan" hidden></nav><main id="content"></main></div></section></div>
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script><script src="../config.js"></script><script src="app.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script><script src="../config.js"></script><script src="app.js?v=11"></script>
 <script>
 let current = null;
 $('#top').textContent = 'Direct messages';
@@ -9,13 +9,15 @@ $('#content').innerHTML = '<div class="empty"><p>Select a DM from the list.</p><
 async function loadDms() {
   const { data: dms = [] } = await sb.from('dms').select('*');
   const ids = dms.map(d => d.user_a === me.id ? d.user_b : d.user_a);
-  const { data: ps = [] } = ids.length ? await sb.from('profiles').select('id,username').in('id', ids) : {};
-  const items = dms.map((d, i) => ({ id: d.id, label: ps.find(p => p.id === ids[i])?.username || 'unknown' }));
+  let { data: ps } = ids.length ? await sb.from('profile_badges').select('id,username,badge').in('id', ids) : {};
+  if (!ps && ids.length) ({ data: ps } = await sb.from('profiles').select('id,username').in('id', ids));
+  ps = ps || [];
+  const items = dms.map((d, i) => ({ id: d.id, label: ps.find(p => p.id === ids[i])?.username || 'unknown', badge: ps.find(p => p.id === ids[i])?.badge }));
   list(await applyOrder(items), current, pick, 'No DMs yet. Use the button below to start one.');
 }
 function pick(it) {
   current = it.id;
-  $('#top').textContent = it.label;
+  $('#top').innerHTML = esc(it.label) + (it.badge ? badge(it.badge) : '');
   loadDms();
   openChat('dm_messages', 'dm_id', it.id);
 }

@@ -1,6 +1,19 @@
 const sb = supabase.createClient(new URL(SUPABASE_URL.trim()).origin, SUPABASE_ANON_KEY.trim());
 const $ = (s, r = document) => r.querySelector(s);
 const esc = s => String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const APP_KIND = 'main'; // main app.js lives in the root folder, beta app.js in /beta
+console.info('chat app.js:', APP_KIND, 'v11');
+addEventListener('DOMContentLoaded', () => {
+  if ((APP_KIND === 'beta') !== location.pathname.includes('/beta/')) {
+    const d = document.createElement('div');
+    d.style.cssText = 'position:fixed;z-index:200;left:0;right:0;top:0;padding:10px 14px;background:#b00020;color:#fff;font:14px system-ui,sans-serif';
+    d.textContent = APP_KIND === 'beta'
+      ? 'Wrong file: the beta app.js was uploaded outside the beta folder.'
+      : 'Wrong file: the main app.js was uploaded inside the beta folder.';
+    document.body.append(d);
+  }
+});
+
 let me, profile, sub, isMod = false, isBeta = false;
 
 const setTheme = t => { try { localStorage.setItem('theme', t); } catch {} document.documentElement.dataset.theme = t; };

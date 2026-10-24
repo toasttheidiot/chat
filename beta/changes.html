@@ -20,7 +20,7 @@ $c.innerHTML = blank;
 function renderList() {
   list(updates.map(u => ({ id: u.id, label: u.title, sub: new Date(u.created_at).toLocaleDateString() })),
     current, pick, 'No updates yet.');
-  $('#list').querySelectorAll('.item').forEach(x => x.draggable = false); // update order is always newest first
+  $('#list').querySelectorAll('.item').forEach(x => x.draggable = false);
 }
 
 async function loadUpdates() {
@@ -47,7 +47,6 @@ function show(u) {
   if (isMod) $('#ed').onclick = () => editor(u);
 }
 
-// Moderators only (the database enforces this too)
 function editor(u) {
   $c.innerHTML = `<form class="cl-wrap"><h2></h2>
     <label>Update name<input name="t" maxlength="100" required placeholder="e.g. v0.3 – Voice rooms"></label>

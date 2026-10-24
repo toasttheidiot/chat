@@ -1,8 +1,8 @@
 <!doctype html><html lang="en"><head><title>Direct messages (beta)</title><meta charset="utf-8"><script>try{document.documentElement.dataset.theme=localStorage.getItem("theme")||"dark"}catch(e){}</script><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="../style.css?v=11"></head><body>
 <div id="app"><aside id="side"></aside><section id="right"><header id="top"></header><div id="row"><nav id="chan" hidden></nav><main id="content"></main></div></section></div>
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script><script src="../config.js"></script><script src="app.js?v=12"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script><script src="../config.js"></script><script src="app.js?v=13"></script>
 <script>
-let current = null, unread = {};
+let current = null, unread = {}, dmItems = [];
 $('#top').textContent = 'Direct messages';
 $('#content').innerHTML = '<div class="empty"><p>Select a DM from the list.</p></div>';
 
@@ -16,9 +16,10 @@ async function loadDms() {
   const { data: un } = await sb.rpc('dm_unread');
   unread = Object.fromEntries((un || []).map(r => [r.dm, Number(r.n)]));
   const items = dms.map((d, i) => ({
-    id: d.id, label: ps.find(p => p.id === ids[i])?.username || 'unknown', badge: ps.find(p => p.id === ids[i])?.badge,
+    id: d.id, uid: ids[i], label: ps.find(p => p.id === ids[i])?.username || 'unknown', badge: ps.find(p => p.id === ids[i])?.badge,
     count: d.id === current ? 0 : unread[d.id] || 0
   }));
+  dmItems = items;
   list(await applyOrder(items), current, pick, 'No DMs yet. Use the button below to start one.');
 }
 
@@ -27,6 +28,8 @@ const markRead = id => sb.rpc('mark_dm_read', { did: id });
 async function pick(it) {
   current = it.id;
   $('#top').innerHTML = esc(it.label) + (it.badge ? badge(it.badge) : '');
+  $('#top').classList.toggle('plink', !!it.uid);
+  $('#top').onclick = it.uid ? () => openProfile(it.uid) : null;
   openChat('dm_messages', 'dm_id', it.id);
   await markRead(it.id);
   loadDms();
@@ -39,7 +42,7 @@ boot('dms').then(() => {
     const { data, error } = await sb.rpc('start_dm', { uname: u.trim() });
     if (error) return alert(error.message);
     await loadDms();
-    pick({ id: data, label: u.trim() });
+    pick(dmItems.find(x => x.id === data) || { id: data, label: u.trim() });
   });
   loadDms();
   // A message arrives in a DM that isn’t open: refresh the unread counts

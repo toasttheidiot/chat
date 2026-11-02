@@ -1,0 +1,352 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><script>try{document.documentElement.dataset.theme=localStorage.getItem("theme")||"dark"}catch(e){}</script><meta name="viewport" content="width=device-width,initial-scale=1"><title>Rooms (beta)</title><link rel="stylesheet" href="../style.css?v=15"></head><body>
+<div id="app"><aside id="side"></aside><section id="right"><header id="top"></header><div id="row"><nav id="chan" hidden></nav><main id="content"></main></div></section></div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script><script src="../config.js"></script><script src="app.js?v=18"></script>
+<script>
+let rooms = [], room = null, channel = null, chanList = [], mentionCh = {}, mentionRoom = {}, modalRedraw = null, timeoutTimer = null;
+const blank = '<div class="empty"><p>Select a room from the list.</p></div>';
+$('#top').textContent = 'Rooms';
+$('#content').innerHTML = blank;
+
+function clearRoom() {
+  room = null; channel = null; chanList = [];
+  $('#chan').hidden = true;
+  $('#top').textContent = 'Rooms';
+  $('#content').innerHTML = blank;
+}
+
+async function loadMentions() {
+  const { data } = await sb.rpc('mention_unread');
+  mentionCh = {}; mentionRoom = {};
+  for (const r of data || []) {
+    mentionCh[r.channel] = Number(r.n);
+    mentionRoom[r.room] = (mentionRoom[r.room] || 0) + Number(r.n);
+  }
+}
+async function renderRooms() {
+  list(await applyOrder(rooms), room?.id, pickRoom, 'No rooms yet. Create one or join with an ID.',
+    (it, e) => ctxMenu(e.clientX, e.clientY, [['Leave room', () => leaveRoom(it), true]]));
+}
+const chanLabel = c => esc((c.read_only ? '🔒 ' : '# ') + c.name) + (mentionCh[c.id] ? dot(mentionCh[c.id]) : '');
+function paintChannelDots() {
+  for (const b of document.querySelectorAll('#chan .item[data-cid]')) {
+    const c = chanList.find(x => x.id === b.dataset.cid);
+    if (c) b.innerHTML = chanLabel(c);
+  }
+}
+async function applyMentions() {
+  await loadMentions();
+  for (const r of rooms) r.count = mentionRoom[r.id] || 0;
+  await renderRooms();
+  paintChannelDots();
+}
+async function markChannelRead(cid) {
+  await sb.rpc('mark_channel_read', { cid });
+  applyMentions();
+}
+
+async function loadRooms() {
+  const { data, error } = await sb.from('room_members').select('can_talk,can_kick,can_channels,can_mention_all,timeout_until,rooms(id,name,owner_id,icon_url,join_locked)').eq('user_id', me.id);
+  if (error) { $('#list').innerHTML = '<div class="hint">Could not load rooms: ' + esc(error.message) + '</div>'; return; }
+  rooms = (data || []).filter(r => r.rooms).map(r => ({
+    id: r.rooms.id, label: r.rooms.name, name: r.rooms.name, icon_url: r.rooms.icon_url, locked: r.rooms.join_locked,
+    isRoom: true, sub: 'ID: ' + r.rooms.id,
+    owner: r.rooms.owner_id, isOwner: r.rooms.owner_id === me.id,
+    canTalk: r.can_talk, canKick: r.can_kick, canChannels: r.can_channels, canAll: r.can_mention_all, timeoutUntil: r.timeout_until
+  }));
+  await applyMentions();
+}
+
+async function refreshRoom() {
+  await loadRooms();
+  if (room) {
+    room = rooms.find(r => r.id === room.id) || room;
+    renderHeader();
+  }
+}
+
+async function leaveRoom(it) {
+  const extra = it.isOwner ? ' Ownership passes to another member, or the room is deleted if you are the last one.' : '';
+  if (!confirm(`Leave “${it.label}”?${extra}`)) return;
+  const { error } = await sb.rpc('leave_room', { rid: it.id });
+  if (error) return alert(error.message);
+  if (room?.id === it.id) clearRoom();
+  loadRooms();
+}
+
+function channelDialog(canLock) {
+  return new Promise(res => {
+    const m = document.createElement('div');
+    m.className = 'modal';
+    m.innerHTML = `<form class="pick dlg" style="width:min(400px,92vw)"><h3>Create channel</h3>
+      <label>Channel name<input name="n" maxlength="30" required></label>
+      ${canLock ? '<label class="chk"><input type="checkbox" name="ro"> Read-only: only you and people you give permission to can type</label>' : ''}
+      <div class="row"><button type="button" class="x">Cancel</button><button>Create</button></div></form>`;
+    document.body.append(m);
+    const f = $('form', m);
+    f.n.focus();
+    const done = v => { m.remove(); res(v); };
+    $('.x', m).onclick = () => done(null);
+    m.onclick = e => { if (e.target === m) done(null); };
+    f.onsubmit = e => { e.preventDefault(); done({ name: f.n.value, ro: !!f.ro?.checked }); };
+  });
+}
+
+function renderHeader() {
+  const top = $('#top');
+  top.innerHTML = '';
+  top.append(roomIcon(room, 'sm'));
+  const n = document.createElement('span');
+  n.textContent = room.label;
+  const id = document.createElement('small');
+  id.textContent = 'ID: ' + room.id;
+  top.append(n, id);
+  if (room.isOwner) {
+    const g = document.createElement('button');
+    g.className = 'rgear'; g.textContent = '⚙ Room settings';
+    g.onclick = roomSettings;
+    top.append(g);
+  }
+}
+
+async function fetchChannels() {
+  const { data } = await sb.from('channels').select('*').eq('room_id', room.id).order('position').order('created_at');
+  chanList = data || [];
+}
+
+function renderNav() {
+  const nav = $('#chan');
+  nav.hidden = false;
+  nav.innerHTML = '';
+  if (room.isOwner || room.canChannels) {
+    const add = document.createElement('button');
+    add.className = 'item add'; add.textContent = '+ Create channel';
+    add.onclick = createChannelFlow;
+    nav.append(add);
+  }
+  for (const c of chanList) {
+    const b = document.createElement('div');
+    b.className = 'item' + (channel?.id === c.id ? ' on' : '');
+    b.setAttribute('role', 'button'); b.tabIndex = 0;
+    b.dataset.cid = c.id;
+    b.innerHTML = chanLabel(c);
+    b.onclick = () => pickChannel(c);
+    b.onkeydown = e => { if (e.key === 'Enter') pickChannel(c); };
+    if (room.isOwner) {
+      b.draggable = true;
+      b.oncontextmenu = e => {
+        e.preventDefault();
+        ctxMenu(e.clientX, e.clientY, [['Rename channel', () => renameChannel(c)], ['Delete channel', () => deleteChannel(c), true]]);
+      };
+    }
+    nav.append(b);
+  }
+  sortable(nav, '.item[data-cid]', 'cid', reorderNav);
+}
+
+async function syncChannels() {
+  if (!room) return;
+  await fetchChannels();
+  if (channel && !chanList.some(c => c.id === channel.id)) {
+    channel = null;
+    renderNav();
+    if (chanList[0]) pickChannel(chanList[0]);
+    else $('#content').innerHTML = blank;
+  } else {
+    if (channel) channel = chanList.find(c => c.id === channel.id);
+    renderNav();
+  }
+  if (modalRedraw) modalRedraw();
+}
+
+async function createChannelFlow() {
+  const r = await channelDialog(room.isOwner);
+  if (!r || !r.name.trim()) return;
+  const { data: id, error } = await sb.rpc('create_channel', { rid: room.id, cname: r.name, ronly: r.ro });
+  if (error) return alert(error.message);
+  await syncChannels();
+  const c = chanList.find(x => x.id === id);
+  if (c) pickChannel(c);
+}
+
+async function renameChannel(c) {
+  const n = await askText('Rename channel', 'Channel name', c.name, 30);
+  if (!n || !n.trim()) return;
+  const { error } = await sb.rpc('rename_channel', { cid: c.id, new_name: n });
+  if (error) return alert(error.message);
+  await syncChannels();
+}
+
+async function deleteChannel(c) {
+  if (!confirm(`Delete #${c.name} and all its messages?`)) return;
+  const { error } = await sb.rpc('delete_channel', { cid: c.id });
+  if (error) return alert(error.message);
+  await syncChannels();
+}
+
+async function reorderNav(ids) {
+  chanList = ids.map(id => chanList.find(c => c.id === id)).filter(Boolean);
+  const { error } = await sb.rpc('reorder_channels', { rid: room.id, ids });
+  if (error) alert(error.message);
+  await syncChannels();
+}
+
+async function pickRoom(it, openId) {
+  room = it; channel = null;
+  await loadRooms();
+  room = rooms.find(r => r.id === it.id) || it;
+  renderHeader();
+  $('#content').innerHTML = '';
+  await fetchChannels();
+  renderNav();
+  const first = chanList.find(c => c.id === openId) || chanList[0];
+  if (first) pickChannel(first);
+}
+
+function pickChannel(c) {
+  channel = c;
+  document.querySelectorAll('#chan .item').forEach(x => x.classList.toggle('on', x.dataset.cid === c.id));
+  const timedOut = !!room.timeoutUntil && new Date(room.timeoutUntil) > new Date();
+  const locked = timedOut || (c.read_only && !(room.isOwner || room.canTalk));
+  const lockedMsg = timedOut ? 'You can’t send messages in this room right now. ' + timeoutText(room.timeoutUntil) : undefined;
+  openChat('room_messages', 'channel_id', c.id, { locked, lockedMsg, room });
+  clearTimeout(timeoutTimer);
+  if (timedOut) {
+    const ms = new Date(room.timeoutUntil) - Date.now();
+    if (ms < 2147000000) timeoutTimer = setTimeout(() => { if (channel) pickChannel(channel); }, ms + 500);
+  }
+  markChannelRead(c.id);
+}
+
+function roomSettings() {
+  const m = document.createElement('div');
+  m.className = 'modal';
+  m.innerHTML = `<div class="pick rset"><h3>Room settings</h3>
+    <div class="rsec"><div class="phead"><span class="ricon big"></span><div class="rbtns"><button type="button" class="up">Upload icon</button><button type="button" class="rmicon">Remove icon</button></div><input class="ifile" type="file" accept="image/png,image/jpeg,image/gif,image/webp" hidden></div></div>
+    <div class="rsec"><label>Room name<div class="nrow"><input class="rn" maxlength="50"><button type="button" class="rs">Save</button></div></label></div>
+    <div class="rsec prow"><div><b>Restrict joining</b><div class="note">When on, nobody can join this room with its ID.</div></div><input type="checkbox" class="sw lock"></div>
+    <div class="rsec"><b>Channels</b><div class="note">Drag to reorder.</div><div class="clist"></div></div>
+    <p class="note rmsg"></p>
+    <div class="rsec"><button type="button" class="danger delroom">Delete room</button></div>
+    <div class="pfoot"><button type="button" class="x">Done</button></div></div>`;
+  document.body.append(m);
+  const say = t => { $('.rmsg', m).textContent = t; };
+  const paintIcon = () => $('.ricon', m).replaceWith(roomIcon(room, 'big'));
+  paintIcon();
+  $('.rn', m).value = room.name;
+  $('.lock', m).checked = !!room.locked;
+
+  const box = $('.clist', m);
+  const drawChannels = () => {
+    box.innerHTML = '';
+    for (const c of chanList) {
+      const r = document.createElement('div');
+      r.className = 'crow'; r.draggable = true; r.dataset.cid = c.id;
+      r.innerHTML = '<span class="grip">&#8942;&#8942;</span><span class="cname"></span><button type="button" class="ren">Rename</button><button type="button" class="del danger">Delete</button>';
+      $('.cname', r).textContent = (c.read_only ? '🔒 ' : '# ') + c.name;
+      $('.ren', r).onclick = () => renameChannel(c);
+      $('.del', r).onclick = () => deleteChannel(c);
+      box.append(r);
+    }
+  };
+  modalRedraw = drawChannels;
+  drawChannels();
+  sortable(box, '.crow', 'cid', reorderNav);
+
+  const onKey = e => e.key === 'Escape' && close();
+  const close = () => { modalRedraw = null; m.remove(); removeEventListener('keydown', onKey); };
+  addEventListener('keydown', onKey);
+  m.onclick = e => { if (e.target === m) close(); };
+  $('.x', m).onclick = close;
+
+  $('.rs', m).onclick = async () => {
+    const { error } = await sb.rpc('rename_room', { rid: room.id, new_name: $('.rn', m).value });
+    if (error) return say(error.message);
+    await refreshRoom();
+    say('Saved.');
+  };
+  $('.lock', m).onchange = async e => {
+    const { error } = await sb.rpc('set_join_locked', { rid: room.id, locked: e.target.checked });
+    if (error) { e.target.checked = !e.target.checked; return say(error.message); }
+    room.locked = e.target.checked;
+    say(room.locked ? 'Joining is restricted.' : 'Joining is open.');
+  };
+  $('.up', m).onclick = () => $('.ifile', m).click();
+  $('.ifile', m).onchange = async e => {
+    const f = e.target.files[0];
+    if (!f) return;
+    if (!/^image\/(png|jpeg|gif|webp)$/.test(f.type)) return say('Please choose a PNG, JPG, GIF or WebP image.');
+    if (f.size > 2 * 1024 * 1024) return say('The image must be under 2 MB.');
+    const path = `${room.id}/icon`;
+    const up = await sb.storage.from('room-icons').upload(path, f, { upsert: true, contentType: f.type });
+    if (up.error) return say(up.error.message);
+    const url = sb.storage.from('room-icons').getPublicUrl(path).data.publicUrl + '?v=' + Date.now();
+    const { error } = await sb.rpc('set_room_icon', { rid: room.id, url });
+    if (error) return say(error.message);
+    await refreshRoom();
+    paintIcon();
+    say('Icon updated.');
+  };
+  $('.rmicon', m).onclick = async () => {
+    const { error } = await sb.rpc('set_room_icon', { rid: room.id, url: null });
+    if (error) return say(error.message);
+    sb.storage.from('room-icons').remove([`${room.id}/icon`]);
+    await refreshRoom();
+    paintIcon();
+    say('Icon removed.');
+  };
+  $('.delroom', m).onclick = async () => {
+    const n = await askText('Delete room', `Type “${room.name}” to confirm`, '', 50);
+    if (n === null) return;
+    if (n !== room.name) return say('That is not the room name, so nothing was deleted.');
+    if (room.icon_url) await sb.storage.from('room-icons').remove([`${room.id}/icon`]);
+    const { error } = await sb.rpc('delete_room', { rid: room.id });
+    if (error) return say(error.message);
+    close();
+    clearRoom();
+    loadRooms();
+  };
+}
+
+boot('rooms').then(() => {
+  addButton('+ Create room', async () => {
+    const n = prompt('Room name:');
+    if (!n) return;
+    const { data, error } = await sb.rpc('create_room', { rname: n.trim() });
+    if (error) return alert(error.message);
+    alert('Room created. Share this ID so others can join: ' + data);
+    await loadRooms();
+    pickRoom(rooms.find(r => r.id === data) || { id: data, label: n.trim() });
+  });
+  addButton('Join with ID', async () => {
+    const id = prompt('Enter room ID:');
+    if (!id) return;
+    const { data, error } = await sb.rpc('join_room', { rid: id.trim() });
+    if (error) return alert(error.message);
+    await loadRooms();
+    pickRoom(rooms.find(r => r.id === id.trim()) || { id: id.trim(), label: data });
+  });
+  loadRooms();
+  sb.channel('my-rooms')
+    .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'room_members' }, p => {
+      if (p.old.user_id !== me.id) return;
+      if (room?.id === p.old.room_id) clearRoom();
+      loadRooms();
+    })
+    .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'room_members', filter: `user_id=eq.${me.id}` }, p => {
+      if (room?.id === p.new.room_id) pickRoom(room, channel?.id);
+    })
+    .subscribe();
+  let tm, ts, tr;
+  sb.channel('room-mentions')
+    .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'room_messages' }, async p => {
+      if (p.new.user_id === me.id) return;
+      if (channel && p.new.channel_id === channel.id && !document.hidden) await sb.rpc('mark_channel_read', { cid: channel.id });
+      clearTimeout(tm); tm = setTimeout(applyMentions, 300);
+    }).subscribe();
+  sb.channel('room-structure')
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'channels' }, () => { clearTimeout(ts); ts = setTimeout(syncChannels, 300); })
+    .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'rooms' }, () => { clearTimeout(tr); tr = setTimeout(refreshRoom, 300); })
+    .subscribe();
+  document.addEventListener('visibilitychange', () => { if (!document.hidden && channel) markChannelRead(channel.id); });
+});
+</script></body></html>
